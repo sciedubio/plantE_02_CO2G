@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#f2f8f1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>광합성 가상실험</title>
+  
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+    
+    :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --main-color: #2f9e44;
+      --bg-color: #f2f8f1;
+    }
+    
+    body {
+      margin: 0; padding: 0;
+      font-family: 'Noto Sans KR', sans-serif;
+      background-color: var(--bg-color); color: #16301d;
+      overflow: hidden; overscroll-behavior-y: none;
+      word-break: keep-all; overflow-wrap: break-word;
+      user-select: none; -webkit-user-select: none;
+      touch-action: pan-y;
+    }
+
+    .h-screen-safe {
+      height: 100dvh; height: calc(var(--vh, 1vh) * 100);
+    }
+
+    .scrollable-panel {
+      overflow-y: auto; touch-action: pan-y; -webkit-overflow-scrolling: touch;
+    }
+
+    canvas {
+      touch-action: none; display: block; width: 100%; height: 100%; outline: none;
+    }
+
+    .dnd-card {
+      touch-action: none; background: #ffffff; color: #16301d;
+      padding: 8px 14px; border-radius: 11px; font-weight: 800;
+      cursor: grab; box-shadow: 0 3px 8px rgba(30,70,40,0.15);
+      font-size: 0.9rem; display: inline-flex; align-items: center; margin: 4px;
+      border: 1px solid #cee2c9; white-space: nowrap; transition: transform 0.1s;
+    }
+    .dnd-card:active { transform: scale(0.95); cursor: grabbing; }
+    .dnd-card.small {
+      padding: 4px 10px; font-size: 0.8rem; border-radius: 8px;
+      border: 2px solid #2f9e44; background: #e9f4e6; color: #1a7431;
+    }
+    .dnd-slot {
+      border: 2px dashed #a9c5a3; border-radius: 10px; background: #ffffff;
+      display: flex; align-items: center; justify-content: center;
+    }
+    
+    @keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    .animate-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+    
+    button { transition: transform 0.1s, opacity 0.2s, background-color 0.2s; }
+    button:active:not(:disabled) { transform: scale(0.95); }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: #a9c5a3; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const setVH = () => document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
+    window.addEventListener('resize', setVH);
+    setVH();
+
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzZVwyt4lh0TRNCRVxWZcRd2vSXdPQ_ofLCUpKBJ8nQYnBMwxLKQvD-IJgBg4TIa1wD/exec";
+
+    const koTie = (s) => String(s).replace(/(^|[>\s(])(그|이|저|한|두|세|네|다섯|각|첫|온|새|더|못|안|곧|또|잘|왜|늘|약|총|덜)[ ](?=[가-힣(])/g, '$1$2\u00A0');
+
+    const Haptic = (() => {
+      const enabled = ('vibrate' in navigator);
+      let last = 0;
+      const vibrate = (pattern) => {
+        if (!enabled) return;
+        const now = Date.now();
+        if (now - last < 30) return;
+        last = now;
+        try { navigator.vibrate(pattern); } catch (e) {}
+      };
+      return {
+        tap: () => vibrate(10),
+        success: () => vibrate([40, 50, 40]),
+        error: () => vibrate([30, 40, 30])
+      };
+    })();
+
+    const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    let audioInit = false;
+    const resumeAudio = () => { if(!audioInit && audioCtx.state === 'suspended') { audioCtx.resume(); audioInit=true; } };
+    document.addEventListener('touchstart', resumeAudio, {passive: true});
+    document.addEventListener('mousedown', resumeAudio, {passive: true});
+
+    function playSound(type) {
+      if(type==='pop') Haptic.tap();
+      else if(type==='success' || type==='cheer') Haptic.success();
+      else if(type==='error') Haptic.error();
+      
+      if(audioCtx.state==='suspended') audioCtx.resume();
+      const t = audioCtx.currentTime;
+      
+      if (type==='pop') {
+        const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.frequency.setValueAtTime(600, t); osc.frequency.exponentialRampToValueAtTime(100, t+0.1);
+        gain.gain.setValueAtTime(0.2, t); gain.gain.linearRampToValueAtTime(0, t+0.1);
+        osc.start(t); osc.stop(t+0.1);
+      } else if (type==='success') {
+        const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+        osc.type='sine'; osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.frequency.setValueAtTime(523, t); osc.frequency.setValueAtTime(784, t+0.2); osc.frequency.setValueAtTime(1046, t+0.4);
+        gain.gain.setValueAtTime(0.2, t); gain.gain.linearRampToValueAtTime(0, t+0.8);
+        osc.start(t); osc.stop(t+0.8);
+      } else if (type==='error') {
+        const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.type='sawtooth'; osc.frequency.setValueAtTime(150, t);
+        gain.gain.setValueAtTime(0.3, t); gain.gain.linearRampToValueAtTime(0, t+0.4);
+        osc.start(t); osc.stop(t+0.4);
+      } else if (type==='boil') {
+        const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.type='triangle'; osc.frequency.setValueAtTime(100+Math.random()*50, t);
+        gain.gain.setValueAtTime(0.05, t); gain.gain.linearRampToValueAtTime(0, t+0.1);
+        osc.start(t); osc.stop(t+0.1);
+      }
+    }
+
+    class PhotosynthesisEngine {
+      constructor(canvas, effectCanvas, callbacks) {
+        this.canvas = canvas; this.ctx = canvas.getContext('2d');
+        this.effectCanvas = effectCanvas; this.effectCtx = effectCanvas.getContext('2d');
+        this.callbacks = callbacks;
+        this.frames = 0; this.running = true; this.stage = 0;
+        
+        this.loop = this.loop.bind(this);
+        this.inputStart = this.inputStart.bind(this);
+        this.inputMove = this.inputMove.bind(this);
+        this.inputEnd = this.inputEnd.bind(this);
+        this.resize = this.resize.bind(this);
+        
+        this.resetState();
+        
+        this.canvas.addEventListener('mousedown', this.inputStart);
+        this.canvas.addEventListener('mousemove', this.inputMove);
+        this.canvas.addEventListener('mouseup', this.inputEnd);
+        this.canvas.addEventListener('touchstart', this.inputStart, {passive:false});
+        this.canvas.addEventListener('touchmove', this.inputMove, {passive:false});
+        this.canvas.addEventListener('touchend', this.inputEnd);
+        
+        this.resize();
+        this.animationId = requestAnimationFrame(this.loop);
+      }
+
+      resetState() {
+        this.introParticles = []; this.starchChain = []; this.particles = [];
+        this.dragItem = null; this.mouse = {x:0, y:0, down:false};
+        this.heldTool = false; this.downPos = null;
+        this.mblData = { A:[], B:[], C:[], running:false, done:false };
+        this.hotplate = { on:false, temp:20, bubbles:[], bleachProgress:0.0, done:false };
+        this.plantPos = { A:0, B:0, C:0 }; 
+        this.dishLeaves = [
+          { progress:0, isReacting:false, target: [0,0,68] },   
+          { progress:0, isReacting:false, target: [139,69,19] }, 
+          { progress:0, isReacting:false, target: [139,69,19] }  
+        ];
+        this.dropper = { visible:false, x:0, y:0, target:-1, squeezing:false, dy:0 };
+        this.initMBLPositions();
+      }
+
+      destroy() {
+        this.running = false; cancelAnimationFrame(this.animationId);
+        this.canvas.removeEventListener('mousedown', this.inputStart);
+        this.canvas.removeEventListener('mousemove', this.inputMove);
+        this.canvas.removeEventListener('mouseup', this.inputEnd);
+        this.canvas.removeEventListener('touchstart', this.inputStart);
+        this.canvas.removeEventListener('touchmove', this.inputMove);
+        this.canvas.removeEventListener('touchend', this.inputEnd);
+      }
+
+      setStage(s) {
+        this.stage = s;
+        if(s === 0) { this.introParticles = []; this.starchChain = []; }
+        this.resize();
+      }
+
+      getXY(e) {
+        const r = this.canvas.getBoundingClientRect();
+        let cx = e.clientX, cy = e.clientY;
+        if(e.changedTouches) { cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY; }
+        return {x: (cx-r.left) * (this.canvas.width / r.width), y: (cy-r.top) * (this.canvas.height / r.height)};
+      }
+
+      resize() {
+        if(!this.canvas || !this.canvas.parentElement) return;
+        const rect = this.canvas.parentElement.getBoundingClientRect();
+        this.width = rect.width; 
+        this.viewH = window.innerHeight;
+        this.isMobile = this.width < 768;
+        
+        let needH = this.viewH;
+        if(this.isMobile && this.stage === 1) {
+           const MBL_GY = 168 + 300 + 74; 
+           const MBL_GH = 130;
+           needH = Math.max(this.viewH, MBL_GY + MBL_GH + 120); 
+        }
+        
+        this.height = Math.max(needH, 300);
+        this.canvas.width = this.width; this.canvas.height = this.height;
+        this.effectCanvas.width = this.width; this.effectCanvas.height = this.height;
+        this.canvas.parentElement.style.height = `${this.height}px`;
+        
+        this.initMBLPositions();
+      }
+
+      initMBLPositions() {
+        let ty, startX, gap, toolY;
+        if(this.isMobile) {
+           ty = 168; startX = this.width * 0.10; gap = this.width * 0.29; toolY = ty + 300;
+        } else {
+           ty = this.viewH * 0.35; startX = this.width * 0.1; gap = this.width * 0.13; toolY = this.viewH - 100;
+        }
+        if(!this.tubes) {
+            this.tubes = [
+            {id:'A', l:'빛+CO₂', x:startX, y:ty, req:{p:1,l:1,c:1,f:0}, has:{p:0,l:0,c:0,f:0}, co2Anim:0 },
+            {id:'B', l:'빛차단', x:startX+gap, y:ty, req:{p:1,l:0,c:1,f:1}, has:{p:0,l:0,c:0,f:0}, co2Anim:0 },
+            {id:'C', l:'CO₂없음', x:startX+gap*2, y:ty, req:{p:1,l:1,c:0,f:0}, has:{p:0,l:0,c:0,f:0}, co2Anim:0 }
+            ];
+        } else {
+            this.tubes[0].x = startX; this.tubes[0].y = ty;
+            this.tubes[1].x = startX+gap; this.tubes[1].y = ty;
+            this.tubes[2].x = startX+gap*2; this.tubes[2].y = ty;
+        }
+
+        let tx = this.isMobile ? this.width * 0.2 : startX;
+        let tStep = this.isMobile ? this.width/5 : 90;
+        this.tools = [
+          {n:'검정말', t:'plant', i:'🌿', x:tx}, {n:'CO₂', t:'co2', i:'💨', x:tx+tStep},
+          {n:'전등', t:'lamp', i:'💡', x:tx+tStep*2}, {n:'은박지', t:'foil', i:'⬜', x:tx+tStep*3}
+        ].map(t => ({...t, y: toolY}));
+      }
+
+      inputStart(e) {
+        if(this.stage === 0) return;
+        const pos = this.getXY(e); this.mouse.x = pos.x; this.mouse.y = pos.y; this.mouse.down = true;
+
+        if(this.stage === 1) {
+          if(!this.mblData.running && !this.mblData.done) {
+            if(this.dragItem && this.heldTool){ this.placeMBLTool(); return; }
+            this.tools.forEach(t => {
+              if(Math.hypot(t.x-this.mouse.x, t.y-this.mouse.y)<40){
+                this.dragItem=t; this.heldTool=false; this.downPos={x:this.mouse.x, y:this.mouse.y};
+              }
+            });
+          }
+        } else if(this.stage === 2) {
+          let s = this.isMobile ? 1 : 1.3;
+          const hx = this.isMobile ? this.width/2 : this.width*0.75;
+          const hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          const btnX = hx+52*s, btnY = hy+30*s;
+          // Hotplate Power Switch Hit Test
+          if(Math.hypot(this.mouse.x-btnX, this.mouse.y-btnY) < 25*s) { 
+            if(e.cancelable) e.preventDefault(); 
+            this.hotplate.on = !this.hotplate.on; playSound('pop'); 
+          }
+          const ty = this.isMobile ? this.viewH*0.15 : (this.viewH*0.7 - 240*s);
+          const startX = this.width*0.1;
+          ['A','B','C'].forEach((id,i)=>{
+             let tx = startX + i*(this.isMobile ? this.width*0.3 : this.width*0.15);
+             if(this.plantPos[id]===0 && Math.hypot(this.mouse.x-(tx+35*s), this.mouse.y-(ty+130*s)) < 50*s) {
+                 this.dragItem = {type:'move_to_bath', id:id, prevPos: 0}; this.plantPos[id] = 99;
+             }
+          });
+        } else if(this.stage === 3) {
+          let s = this.isMobile ? 1 : 1.3;
+          let hx = this.isMobile ? this.width/2 : this.width*0.75;
+          let hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          
+          ['A', 'B', 'C'].forEach((id, i) => {
+            if(this.plantPos[id] === 1 && Math.hypot(this.mouse.x-(hx-30*s+i*30*s), this.mouse.y-(hy-20*s)) < 25*s) {
+                 this.dragItem = {type:'move_to_dish', id:id, prevPos: 1}; 
+                 this.plantPos[id] = 99;
+            }
+          });
+          const dishY = this.isMobile ? this.viewH*0.35 + 40 : this.viewH*0.55 + 40;
+          if(this.dropper.visible && !this.dropper.squeezing) {
+             let dx = this.dropper.x || this.width/2, dy = this.dropper.y || (this.isMobile ? this.viewH*0.12 : 60);
+             if(this.dropper.target > -1) {
+                 dx = (this.isMobile ? this.width*0.17+this.dropper.target*this.width*0.33 : this.width*0.15+this.dropper.target*180);
+                 dy = dishY - 100*s;
+             }
+             // Increased Dropper hit radius for easy picking
+             if(Math.hypot(this.mouse.x-dx, this.mouse.y-dy) < 80*s) {
+                 this.dragItem = {type:'dropper', ox:this.mouse.x, oy:this.mouse.y, sx:dx, sy:dy};
+                 this.downPos = {x:this.mouse.x, y:this.mouse.y};
+             }
+          }
+        }
+      }
+
+      inputMove(e) {
+        if(this.mouse.down) {
+           const pos = this.getXY(e); this.mouse.x=pos.x; this.mouse.y=pos.y;
+           if(this.dragItem && this.dragItem.type==='dropper') {
+              this.dropper.x = this.dragItem.sx + (this.mouse.x - this.dragItem.ox);
+              this.dropper.y = this.dragItem.sy + (this.mouse.y - this.dragItem.oy);
+           }
+        }
+      }
+
+      inputEnd(e) {
+        this.mouse.down=false;
+        if(!this.dragItem) return;
+
+        if(this.stage === 1) {
+          const moved = this.downPos ? Math.hypot(this.mouse.x-this.downPos.x, this.mouse.y-this.downPos.y) : 99;
+          if(moved <= 10 && !this.heldTool){
+              this.heldTool = true; this.callbacks.onToast(this.dragItem.n+'을(를) 들었어요. 시험관을 탭하세요.'); return;
+          }
+          this.placeMBLTool();
+        } else if(this.stage === 2 && this.dragItem.type==='move_to_bath') {
+          let s = this.isMobile ? 1 : 1.3;
+          const hx = this.isMobile ? this.width/2 : this.width*0.75;
+          const hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          if(Math.hypot(this.mouse.x-hx, this.mouse.y-(hy-60*s)) < 100*s) { 
+              this.plantPos[this.dragItem.id] = 1; playSound('pop'); 
+          } else { this.plantPos[this.dragItem.id] = this.dragItem.prevPos || 0; } 
+        } else if(this.stage === 3) {
+          let s = this.isMobile ? 1 : 1.3;
+          const dishY = this.isMobile ? this.viewH*0.35 + 40 : this.viewH*0.55 + 40;
+          if(this.dragItem.type==='dropper') {
+            const moved = this.downPos ? Math.hypot(this.mouse.x-this.downPos.x, this.mouse.y-this.downPos.y) : 99;
+            if(moved <= 10 && this.dropper.target > -1 && !this.dishLeaves[this.dropper.target].isReacting) {
+                this.dropper.squeezing = true; this.dropper.dy = (dishY - 100*s) + 65*s; playSound('pop');
+            }
+            this.downPos = null;
+          } else if(this.dragItem.type==='move_to_dish') {
+            const id = this.dragItem.id;
+            let idx = (id==='A'?0:(id==='B'?1:2));
+            let dx = this.isMobile ? this.width*0.17+idx*this.width*0.33 : this.width*0.15+idx*180;
+            if(Math.hypot(this.mouse.x-dx, this.mouse.y-dishY) < 60*s) {
+                this.plantPos[id] = 2; playSound('pop');
+            } else { this.plantPos[id] = (this.dragItem.prevPos !== undefined) ? this.dragItem.prevPos : 1; } 
+          }
+        }
+        this.dragItem=null;
+      }
+
+      placeMBLTool() {
+        const lampGap = this.isMobile ? 112 : 146; 
+        this.tubes.forEach(t => {
+          const top = (this.dragItem.t === 'lamp') ? (t.y - lampGap - 34) : (t.y - 24);
+          const bottom = t.y + 204;
+          if(Math.abs(this.mouse.x - (t.x + 35)) < 52 && this.mouse.y > top && this.mouse.y < bottom) {
+             let d = this.dragItem.t; let valid = false;
+             if(d==='plant'&&t.req.p) { t.has.p=1; valid=true; }
+             else if(d==='foil'&&t.req.f) { t.has.f=1; valid=true; }
+             else if(d==='lamp'&&t.req.l) { t.has.l=1; valid=true; }
+             else if(d==='co2'&&t.req.c) { t.has.c=1; t.co2Anim=120; valid=true; }
+             if(valid) playSound('pop');
+             else { 
+               playSound('error'); 
+               this.callbacks.onToast('조건에 맞지 않습니다!'); 
+               if(this.callbacks.onInteractionError) this.callbacks.onInteractionError('mbl'); 
+             }
+          }
+        });
+        if(this.tubes.every(t=> t.has.p&&t.has.l===t.req.l&&t.has.c===t.req.c&&t.has.f===t.req.f)) {
+            this.callbacks.onReady('mbl');
+        }
+        this.dragItem = null; this.heldTool = false; this.downPos = null;
+      }
+
+      rrect(x, y, w, h, r) { this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, r); }
+      
+      drawDropHint(x, y, r) {
+        this.ctx.save();
+        this.ctx.strokeStyle = `rgba(47, 158, 68, ${0.5 + Math.sin(this.frames*0.1)*0.4})`;
+        this.ctx.lineWidth = 4;
+        this.ctx.setLineDash([8, 8]);
+        this.ctx.beginPath(); this.ctx.arc(x, y, r, 0, Math.PI*2); this.ctx.stroke();
+        this.ctx.restore();
+      }
+
+      drawFoil(x, y, w, h) {
+        this.ctx.save();
+        const pad = 6;
+        const fx = x - pad, fy = y - 9, fw = w + pad*2, fh = h + 16;
+        const r = fw/2, bodyH = fh - r;
+        const path = () => {
+            this.ctx.beginPath(); this.ctx.moveTo(fx, fy); this.ctx.lineTo(fx, fy+bodyH);
+            this.ctx.arc(fx+r, fy+bodyH, r, Math.PI, 0, true); this.ctx.lineTo(fx+fw, fy); this.ctx.closePath();
+        };
+        const g = this.ctx.createLinearGradient(fx, 0, fx+fw, 0);
+        g.addColorStop(0.00, '#8a939b'); g.addColorStop(0.14, '#e8eef2'); g.addColorStop(0.30, '#b3bdc5');
+        g.addColorStop(0.46, '#fbfdfe'); g.addColorStop(0.60, '#a6b0b8'); g.addColorStop(0.78, '#dfe5ea'); g.addColorStop(1.00, '#7c858c');
+        path(); this.ctx.fillStyle = g; this.ctx.fill();
+
+        this.ctx.save(); path(); this.ctx.clip();
+        for(let i=0; i<42; i++){
+            const r1 = Math.abs(Math.sin(i*12.9898)*43758.5453) % 1;
+            const r2 = Math.abs(Math.sin(i*78.233 )*43758.5453) % 1;
+            const r3 = Math.abs(Math.sin(i*39.425 )*24634.6345) % 1;
+            const px = fx + r1*fw, py = fy + r2*fh; const sz = 4 + r3*6;
+            this.ctx.beginPath(); this.ctx.moveTo(px, py); this.ctx.lineTo(px + sz, py + sz*0.8 + 3); this.ctx.lineTo(px - sz*0.7, py + sz*1.5 + 4); this.ctx.closePath();
+            this.ctx.fillStyle = (i%2) ? 'rgba(255,255,255,0.20)' : 'rgba(112,124,135,0.13)'; this.ctx.fill();
+        }
+        this.ctx.lineWidth = 1;
+        for(let i=0; i<14; i++){
+            const r1 = Math.abs(Math.sin(i*3.17)*9137.13) % 1; const r2 = Math.abs(Math.sin(i*7.91)*3571.70) % 1; const sx = fx + r1*fw;
+            this.ctx.strokeStyle = (i%2) ? 'rgba(255,255,255,0.42)' : 'rgba(104,116,127,0.24)';
+            this.ctx.beginPath(); this.ctx.moveTo(sx, fy + r2*fh*0.5); this.ctx.quadraticCurveTo(sx + (r2-0.5)*9, fy + fh*0.55, sx + (r1-0.5)*11, fy + fh*(0.55 + r2*0.42)); this.ctx.stroke();
+        }
+        this.ctx.restore();
+        const bandH = 13;
+        const tg = this.ctx.createLinearGradient(fx, 0, fx+fw, 0);
+        tg.addColorStop(0,'#9aa3ab'); tg.addColorStop(0.22,'#f2f6f9'); tg.addColorStop(0.5,'#b9c1c9'); tg.addColorStop(0.78,'#eef3f6'); tg.addColorStop(1,'#879097');
+        this.ctx.fillStyle = tg; this.ctx.fillRect(fx, fy, fw, bandH);
+        path(); this.ctx.strokeStyle='#828c94'; this.ctx.lineWidth=1.8; this.ctx.stroke();
+        this.ctx.restore();
+      }
+      
+      drawTube(x, y, w, h, fill) {
+        this.ctx.save();
+        const r = w/2, bodyH = h - r;
+        const path = () => { this.ctx.beginPath(); this.ctx.moveTo(x, y); this.ctx.lineTo(x, y+bodyH); this.ctx.arc(x+r, y+bodyH, r, Math.PI, 0, true); this.ctx.lineTo(x+w, y); this.ctx.closePath(); };
+        if(fill){
+            this.ctx.save(); path(); this.ctx.clip(); this.ctx.fillStyle = fill; this.ctx.fillRect(x, y+h*0.10, w, h);
+            this.ctx.strokeStyle='rgba(120,180,220,0.75)'; this.ctx.lineWidth=2; this.ctx.beginPath();
+            for(let i=0;i<=w;i+=6) this.ctx.lineTo(x+i, y+h*0.10+Math.sin(i*0.22+this.frames*0.05)*1.4);
+            this.ctx.stroke(); this.ctx.restore();
+        }
+        const g = this.ctx.createLinearGradient(x, y, x+w, y);
+        g.addColorStop(0,'rgba(255,255,255,0.65)'); g.addColorStop(0.42,'rgba(255,255,255,0.06)'); g.addColorStop(1,'rgba(255,255,255,0.45)');
+        path(); this.ctx.fillStyle=g; this.ctx.fill(); this.ctx.strokeStyle='#9fc0d4'; this.ctx.lineWidth=2.2; path(); this.ctx.stroke();
+        this.ctx.strokeStyle='#8fb3ca'; this.ctx.lineWidth=3.4; this.ctx.beginPath(); this.ctx.moveTo(x-2, y); this.ctx.lineTo(x+w+2, y); this.ctx.stroke();
+        this.ctx.fillStyle='rgba(255,255,255,0.55)'; this.rrect(x+w*0.16, y+8, w*0.09, h-r-16, 3); this.ctx.fill();
+        this.ctx.restore();
+      }
+
+      drawElodea(x, y, scale, color, angle=0) {
+        this.ctx.save(); this.ctx.translate(x,y); this.ctx.scale(scale, scale); this.ctx.rotate(angle);
+        const sway = Math.sin(this.frames*0.03 + x*0.05) * 0.06;
+        this.ctx.strokeStyle=color; this.ctx.lineWidth=2.6; this.ctx.lineCap='round';
+        this.ctx.beginPath(); this.ctx.moveTo(0,0); this.ctx.quadraticCurveTo(6+sway*40, -32, 1, -64); this.ctx.stroke();
+        this.ctx.fillStyle=color;
+        for(let i=0;i<8;i++){
+            const ly = -7 - i*7.8, t = i/7, sx = 5*Math.sin(Math.PI*t) + sway*40*t, len = 8.4 - i*0.35;
+            [-1,1].forEach(d=>{
+                this.ctx.save(); this.ctx.translate(sx, ly); this.ctx.rotate(d*-0.22);
+                this.ctx.beginPath(); this.ctx.ellipse(d*len*0.62, 0, len, 2.4, 0, 0, Math.PI*2); this.ctx.fill();
+                this.ctx.restore();
+            });
+        }
+        this.ctx.restore();
+      }
+
+      drawToolIcon(type, x, y, s) {
+        this.ctx.save(); this.ctx.translate(x, y); this.ctx.scale(s, s);
+        if(type==='plant'){
+            this.ctx.strokeStyle='#2f7d3a'; this.ctx.lineWidth=3; this.ctx.lineCap='round';
+            this.ctx.beginPath(); this.ctx.moveTo(0,16); this.ctx.quadraticCurveTo(3,0,0,-17); this.ctx.stroke();
+            for(let i=0;i<5;i++){
+                const ly=12-i*7;
+                this.ctx.beginPath(); this.ctx.ellipse(-7, ly, 7.5, 3.2, -0.45, 0, Math.PI*2); this.ctx.fillStyle='#43a047'; this.ctx.fill();
+                this.ctx.beginPath(); this.ctx.ellipse( 7, ly, 7.5, 3.2,  0.45, 0, Math.PI*2); this.ctx.fill();
+            }
+        }else if(type==='co2'){
+            [[-11,6,5],[10,8,4]].forEach(b=>{
+                this.ctx.beginPath(); this.ctx.arc(b[0],b[1],b[2],0,Math.PI*2);
+                this.ctx.fillStyle='rgba(134,142,150,0.55)'; this.ctx.fill();
+                this.ctx.strokeStyle='rgba(255,255,255,0.8)'; this.ctx.lineWidth=1.2; this.ctx.stroke();
+            });
+            this.ctx.beginPath(); this.ctx.arc(0,-4,12,0,Math.PI*2); this.ctx.fillStyle='#7c848d'; this.ctx.fill();
+            this.ctx.strokeStyle='rgba(255,255,255,0.85)'; this.ctx.lineWidth=1.6; this.ctx.stroke();
+            this.ctx.fillStyle='#fff'; this.ctx.font='bold 10px Noto Sans KR, sans-serif'; this.ctx.textAlign='center'; this.ctx.textBaseline='middle'; this.ctx.fillText('CO₂', 0, -3);
+        }else if(type==='lamp'){
+            this.ctx.fillStyle='#8d99a6'; this.rrect(-9, 12, 18, 5, 2.5); this.ctx.fill();
+            this.ctx.fillStyle='#adb5bd'; this.ctx.fillRect(-2, -2, 4, 14);
+            this.ctx.fillStyle='#ffca3a';
+            this.ctx.beginPath(); this.ctx.moveTo(-14,-4); this.ctx.lineTo(14,-4); this.ctx.lineTo(9,-18); this.ctx.lineTo(-9,-18); this.ctx.closePath(); this.ctx.fill();
+            this.ctx.strokeStyle='#e0a800'; this.ctx.lineWidth=1.6; this.ctx.stroke();
+        }else if(type==='foil'){
+            const g=this.ctx.createLinearGradient(-15,-13,15,13);
+            g.addColorStop(0,'#b9c1ca'); g.addColorStop(0.35,'#f2f5f8'); g.addColorStop(0.62,'#c8d0d8'); g.addColorStop(1,'#98a2ad');
+            this.ctx.beginPath(); this.ctx.moveTo(-15,-11); this.ctx.lineTo(13,-14); this.ctx.lineTo(16,10); this.ctx.lineTo(-12,14); this.ctx.closePath();
+            this.ctx.fillStyle=g; this.ctx.fill(); this.ctx.strokeStyle='#9aa3ad'; this.ctx.lineWidth=1.4; this.ctx.stroke();
+        }
+        this.ctx.restore();
+      }
+
+      drawMBLSensor(x, y, w, reading) {
+        this.ctx.save(); const h = 58, cx = x + w/2;
+        this.ctx.strokeStyle='#8d99a6'; this.ctx.lineWidth=5; this.ctx.lineCap='round';
+        this.ctx.beginPath(); this.ctx.moveTo(cx, y-h+8); this.ctx.quadraticCurveTo(cx+4, y-h-34, x+w+26, y-h-30); this.ctx.stroke();
+        const bg = this.ctx.createLinearGradient(x, y-h, x, y);
+        bg.addColorStop(0, '#4b5563'); bg.addColorStop(1, '#232a33');
+        this.ctx.fillStyle = bg; this.rrect(x-3, y-h, w+6, h, 9); this.ctx.fill();
+        this.ctx.fillStyle='#0b1a10'; this.rrect(x+4, y-h+7, w-8, 26, 5); this.ctx.fill();
+        this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
+        if(reading){
+            this.ctx.fillStyle='#8ce99a'; this.ctx.font='bold 8px monospace'; this.ctx.fillText('MBL', cx, y-h+14);
+            this.ctx.fillStyle='#39d353'; this.ctx.font='bold 11px monospace'; this.ctx.fillText(reading, cx, y-h+26);
+        }else{
+            this.ctx.fillStyle='#39d353'; this.ctx.font='bold 13px monospace'; this.ctx.fillText('MBL', cx, y-h+20);
+        }
+        for(let i=0;i<3;i++){
+            this.ctx.beginPath(); this.ctx.arc(x+12+i*13, y-h+43, 3.2, 0, Math.PI*2);
+            this.ctx.fillStyle = i===0 ? '#51cf66' : 'rgba(255,255,255,0.22)'; this.ctx.fill();
+        }
+        this.ctx.fillStyle='#b6bec7'; this.rrect(cx-2.5, y+8, 5, 96, 2.5); this.ctx.fill();
+        this.ctx.restore();
+      }
+
+      drawWaterBathShared(hx, hy) {
+        let s = this.isMobile ? 1 : 1.3; let bw = 180*s, bh = 160*s, sw = 80*s, sh = 120*s;
+        const bodyG = this.ctx.createLinearGradient(hx, hy, hx, hy+60*s);
+        bodyG.addColorStop(0, '#59616b'); bodyG.addColorStop(1, '#2b3138');
+        this.ctx.fillStyle=bodyG; this.rrect(hx-100*s, hy, 200*s, 60*s, 10*s); this.ctx.fill();
+        this.ctx.fillStyle='#3c434b'; this.rrect(hx-94*s, hy-9*s, 188*s, 14*s, 5*s); this.ctx.fill();
+        this.ctx.fillStyle = this.hotplate.on ? `rgb(${90+this.hotplate.temp*1.6}, ${30+this.hotplate.temp*0.15}, 24)` : '#aab2ba';
+        if(this.hotplate.on) { this.ctx.shadowBlur=22*s; this.ctx.shadowColor='rgba(255,80,20,0.9)'; }
+        this.rrect(hx-88*s, hy-6*s, 176*s, 9*s, 4*s); this.ctx.fill(); this.ctx.shadowBlur=0;
+        
+        // Power Button UI
+        let btnX = hx+52*s, btnY = hy+30*s, btnR = 18*s;
+        this.ctx.fillStyle = this.hotplate.on ? '#ef4444' : '#22c55e'; // Red for OFF, Green for ON
+        this.ctx.beginPath(); this.ctx.arc(btnX, btnY, btnR, 0, Math.PI*2); this.ctx.fill();
+        this.ctx.fillStyle = '#fff'; this.ctx.font = `bold ${11*s}px Noto Sans KR`; this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
+        this.ctx.fillText(this.hotplate.on ? "OFF" : "ON", btnX, btnY);
+        this.ctx.fillStyle = '#111'; this.ctx.font = `bold ${10*s}px Noto Sans KR`;
+        this.ctx.fillText("가열판", btnX, btnY-25*s);
+
+        this.ctx.fillStyle = this.hotplate.on ? '#ff6b3d' : '#5a6167';
+        this.ctx.font=`bold ${19*s}px Noto Sans KR`; this.ctx.textAlign='right'; this.ctx.textBaseline='middle';
+        this.ctx.fillText(Math.floor(this.hotplate.temp)+'°C', hx-24*s, hy+31*s);
+        this.ctx.fillStyle='#54705b'; this.ctx.font=`bold ${16*s}px Noto Sans KR`; this.ctx.textAlign='center'; this.ctx.fillText("물중탕 장치", hx, hy+85*s);
+        
+        this.ctx.save(); let bx=hx-bw/2, by=hy-bh;
+        this.ctx.fillStyle='rgba(150,205,240,0.38)'; this.ctx.fillRect(bx+3, by+bh*0.12, bw-6, bh*0.88-3);
+        const g = this.ctx.createLinearGradient(bx, by, bx+bw, by);
+        g.addColorStop(0,'rgba(255,255,255,0.55)'); g.addColorStop(0.45,'rgba(255,255,255,0.05)'); g.addColorStop(1,'rgba(255,255,255,0.40)');
+        this.ctx.fillStyle=g; this.ctx.fillRect(bx, by, bw, bh);
+        this.ctx.strokeStyle='#9fc0d4'; this.ctx.lineWidth=2.6;
+        this.ctx.beginPath(); this.ctx.moveTo(bx, by); this.ctx.lineTo(bx, by+bh); this.ctx.lineTo(bx+bw, by+bh); this.ctx.lineTo(bx+bw, by); this.ctx.stroke();
+        this.ctx.restore();
+        
+        this.ctx.fillStyle='#1576c4'; this.ctx.font=`bold ${12*s}px Noto Sans KR`; this.ctx.fillText('물', hx+bw/3, hy-20*s);
+        this.drawTube(hx-sw/2, hy-sh, sw, sh, 'rgba(232,244,252,0.55)');
+        this.ctx.fillStyle='#16301d'; this.ctx.fillText('에탄올', hx, hy-sh/2);
+
+        // Highlight drop target when holding plant
+        if (this.stage === 2 && this.dragItem?.type === 'move_to_bath') {
+            this.drawDropHint(hx, hy-sh/2, 50*s);
+        }
+
+        ['A','B','C'].forEach((id, i) => {
+            if(this.plantPos[id] === 1) {
+                let bp = this.hotplate.bleachProgress, r = bp*238, g = 100+bp*155, b = bp*238;
+                this.drawElodea(hx-30*s + i*30*s, hy-20*s, 1.0*s, `rgb(${r},${g},${b})`); 
+            }
+        });
+        if(this.hotplate.temp >= 78) {
+            if(Math.random()>0.5) this.hotplate.bubbles.push({x:hx-30*s+Math.random()*60*s, y:hy, v:2*s});
+            if(Math.random()<0.08) playSound('boil');
+        }
+        this.ctx.fillStyle='rgba(255,255,255,0.6)';
+        for(let i=this.hotplate.bubbles.length-1; i>=0; i--) {
+            let bub = this.hotplate.bubbles[i]; bub.y -= bub.v;
+            this.ctx.beginPath(); this.ctx.arc(bub.x, bub.y, 3*s, 0, Math.PI*2); this.ctx.fill();
+            if(bub.y < hy-sh) this.hotplate.bubbles.splice(i,1);
+        }
+      }
+
+      loop() {
+        if(!this.running) return;
+        this.frames++;
+        this.ctx.clearRect(0,0,this.width,this.height);
+        
+        if(this.stage === 0) {
+          const cx = this.width/2, cy = this.viewH/2;
+          const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
+          bgGrad.addColorStop(0, '#81c784'); bgGrad.addColorStop(1, '#2e7d32');
+          this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0,0,this.width,this.height);
+          
+          this.ctx.save(); this.ctx.translate(cx, cy);
+          this.ctx.fillStyle = '#00695c'; this.ctx.beginPath(); this.ctx.arc(0, 0, 100, Math.PI, 0); this.ctx.lineTo(100, 80); this.ctx.lineTo(-100, 80); this.ctx.fill();
+          this.ctx.restore();
+          
+          this.ctx.fillStyle = 'white'; this.ctx.font = 'bold 16px Noto Sans KR'; this.ctx.textAlign = 'center';
+          this.ctx.fillText("엽록체 공장", cx, cy+100);
+          
+          if(this.frames % 80 === 0) {
+            this.introParticles.push({ type:'H2O', color:'#0288d1', x:0, y:cy+20, path:[{x:cx-90, y:cy+20}, {x:cx-20, y:cy}], stage:0, speed:2 });
+            this.introParticles.push({ type:'CO2', color:'#757575', x:cx-50, y:0, path:[{x:cx-50, y:cy-80}, {x:cx-20, y:cy}], stage:0, speed:1.5 });
+          }
+
+          for(let i=this.introParticles.length-1; i>=0; i--) {
+            let p = this.introParticles[i]; let target = p.path[p.stage];
+            if(target) {
+                let dx = target.x - p.x, dy = target.y - p.y, dist = Math.hypot(dx, dy);
+                if(dist < 5) {
+                    p.stage++;
+                    if(p.stage >= p.path.length && (p.type==='H2O'||p.type==='CO2')) { p.wait = 30; p.type = 'reacting'; }
+                } else { p.x += (dx/dist)*p.speed; p.y += (dy/dist)*p.speed; }
+            } else if (p.type === 'reacting') {
+                p.wait--;
+                if(p.wait <= 0) {
+                    this.introParticles.push({ type:'O2', color:'#b3e5fc', x:cx+20, y:cy, path:[{x:cx+60, y:cy-80}, {x:cx+60, y:-50}], stage:0, speed:2 });
+                    p.type = 'Glucose'; p.color = '#e1bee7';
+                    p.path = [{x:cx+120, y:cy+150}, {x:cx+150+(Math.random()*40), y:cy+180+(Math.random()*20)}];
+                    p.stage = 0; p.speed = 1.5;
+                }
+            } else if (p.type === 'Glucose' && !p.path[p.stage]) {
+                this.starchChain.push({x:p.x, y:p.y}); this.introParticles.splice(i, 1); continue;
+            } else if (p.type === 'O2' && !p.path[p.stage]) {
+                this.introParticles.splice(i, 1); continue;
+            }
+            this.ctx.fillStyle = p.color;
+            if(p.type === 'Glucose') {
+                this.ctx.beginPath(); for(let k=0; k<6; k++) this.ctx.lineTo(p.x+8*Math.cos(k*Math.PI/3), p.y+8*Math.sin(k*Math.PI/3)); this.ctx.fill();
+            } else if (p.type !== 'reacting') {
+                this.ctx.beginPath(); this.ctx.arc(p.x, p.y, 6, 0, Math.PI*2); this.ctx.fill();
+            }
+          }
+        } 
+        else if(this.stage === 1) {
+          this.tubes.forEach(t => {
+            let cx = t.x+35;
+            this.drawTube(t.x, t.y, 70, 180, 'rgba(170,215,245,0.42)');
+            if(t.has.f) this.drawFoil(t.x, t.y, 70, 180);
+            if(t.has.p && !t.has.f) this.drawElodea(cx, t.y+170, 1.2, '#006400');
+            this.ctx.fillStyle='#16301d'; this.ctx.textAlign='center'; this.ctx.font='bold 15px Noto Sans KR'; this.ctx.fillText(t.id, cx, t.y+210); 
+            this.ctx.fillStyle='#54705b'; this.ctx.font='bold 12px Noto Sans KR'; this.ctx.fillText(t.l, cx, t.y+230);
+            
+            if(t.has.l) { 
+                this.ctx.save(); this.ctx.fillStyle='rgba(255,236,150,0.4)'; this.ctx.beginPath(); this.ctx.moveTo(cx-15, t.y-100); this.ctx.lineTo(cx+15, t.y-100); this.ctx.lineTo(t.x+100, t.y+190); this.ctx.lineTo(t.x-30, t.y+190); this.ctx.fill(); this.ctx.restore();
+            }
+            const dat = this.mblData[t.id];
+            let rd = null;
+            if(dat && dat.length) {
+              rd = `O₂ ${Math.round(dat[dat.length-1].o2)}%`;
+            }
+            this.drawMBLSensor(t.x, t.y, 70, rd);
+          });
+
+          if(this.mblData.running) {
+             if(this.mblData.A.length < 200) {
+                 let t = this.mblData.A.length;
+                 this.mblData.A.push({co2: Math.max(10, 80-t*0.3), o2: Math.min(90, 20+t*0.3)});
+                 this.mblData.B.push({co2: 80, o2: 20}); this.mblData.C.push({co2: 0, o2: 20});
+             } else {
+                 this.mblData.running=false; this.mblData.done=true;
+                 playSound('success'); this.callbacks.onComplete(1);
+             }
+          }
+
+          let gx=10, gw=this.width/3-10, gy=this.isMobile?this.height-140:this.viewH-200, gh=100;
+          ['A','B','C'].forEach((id, i) => {
+             let curGx = gx + i*(gw+5);
+             this.ctx.fillStyle='#fff'; this.ctx.fillRect(curGx, gy, gw, gh);
+             this.ctx.strokeStyle='#eee'; this.ctx.lineWidth=0.5; this.ctx.beginPath();
+             for(let k=1; k<5; k++){ this.ctx.moveTo(curGx, gy+(gh/5)*k); this.ctx.lineTo(curGx+gw, gy+(gh/5)*k); }
+             this.ctx.stroke();
+
+             if(this.mblData.running || this.mblData.done) {
+                 this.ctx.lineWidth=2;
+                 // CO2 Red Line
+                 this.ctx.strokeStyle='#ef4444'; this.ctx.beginPath();
+                 this.mblData[id].forEach((v,x) => { let px=curGx+(x/200)*gw, py=(gy+gh)-(v.co2/100)*gh; if(x===0) this.ctx.moveTo(px,py); else this.ctx.lineTo(px,py); }); this.ctx.stroke();
+                 // O2 Blue Line
+                 this.ctx.strokeStyle='#3b82f6'; this.ctx.beginPath();
+                 this.mblData[id].forEach((v,x) => { let px=curGx+(x/200)*gw, py=(gy+gh)-(v.o2/100)*gh; if(x===0) this.ctx.moveTo(px,py); else this.ctx.lineTo(px,py); }); this.ctx.stroke();
+             }
+             this.ctx.fillStyle='#333'; this.ctx.font='bold 12px Noto Sans KR'; this.ctx.textAlign='left'; this.ctx.fillText(id, curGx+8, gy+18);
+             if(i===0) { 
+                 this.ctx.fillStyle='#ef4444'; this.ctx.fillText('CO₂', curGx+gw-45, gy+18);
+                 this.ctx.fillStyle='#3b82f6'; this.ctx.fillText('O₂', curGx+gw-20, gy+18);
+             }
+          });
+
+          if(!this.mblData.running && !this.mblData.done) {
+             this.tools.forEach(t => {
+                if(this.dragItem===t) return;
+                this.ctx.fillStyle='#fff'; this.ctx.beginPath(); this.ctx.roundRect(t.x-27, t.y-30, 54, 54, 13); this.ctx.fill(); this.ctx.stroke();
+                this.drawToolIcon(t.t, t.x, t.y-3, 1);
+                this.ctx.fillStyle='#16301d'; this.ctx.fillText(t.n, t.x, t.y+36);
+             });
+          }
+        } 
+        else if(this.stage === 2) {
+          let s = this.isMobile ? 1 : 1.3;
+          let hx = this.isMobile ? this.width/2 : this.width*0.75, hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          let startX = this.width*0.1, ty = this.isMobile ? this.viewH*0.15 : (this.viewH*0.7 - 240*s);
+          
+          let countInBeaker = Object.values(this.plantPos).filter(v=>v===1).length;
+          ['A','B','C'].forEach((id,i) => {
+             let tx = startX + i*(this.isMobile ? this.width*0.3 : this.width*0.15);
+             this.drawTube(tx, ty, 70*s, 150*s, 'rgba(170,215,245,0.38)');
+             if(this.plantPos[id] === 0) this.drawElodea(tx+35*s, ty+130*s, 1.2*s, '#006400');
+          });
+          this.drawWaterBathShared(hx, hy);
+
+          if(this.hotplate.on && this.hotplate.temp < 100) this.hotplate.temp += 0.5;
+          if(!this.hotplate.on && this.hotplate.temp > 20) this.hotplate.temp -= 0.5;
+          if(countInBeaker===3 && this.hotplate.temp >= 95 && !this.hotplate.done) {
+             if(this.hotplate.bleachProgress < 1.0) this.hotplate.bleachProgress += 0.005; 
+             else {
+                 this.hotplate.done = true; this.hotplate.on = false; playSound('success'); 
+                 this.callbacks.onComplete(2);
+             }
+          }
+        }
+        else if(this.stage === 3) {
+          let s = this.isMobile ? 1 : 1.3;
+          let hx = this.isMobile ? this.width/2 : this.width*0.75, hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          this.drawWaterBathShared(hx, hy);
+
+          const dishY = this.isMobile ? this.viewH*0.35 + 40 : this.viewH*0.55 + 40;
+          let countInDish = Object.values(this.plantPos).filter(v=>v===2).length;
+          
+          ['A','B','C'].forEach((id,i) => {
+             let dx = this.isMobile ? this.width*0.17+i*this.width*0.33 : this.width*0.15+i*180;
+             // Improved Petri Dish
+             this.ctx.fillStyle='rgba(210, 230, 240, 0.9)'; this.ctx.beginPath(); this.ctx.ellipse(dx, dishY, 60*s, 20*s, 0, 0, Math.PI*2); this.ctx.fill();
+             this.ctx.strokeStyle='#7a9eb3'; this.ctx.lineWidth=2*s; this.ctx.stroke();
+
+             this.ctx.fillStyle='#16301d'; this.ctx.fillText(id, dx, dishY+40*s);
+             
+             if (this.dragItem && (this.dragItem.type==='move_to_dish' || this.dragItem.type==='dropper')) {
+                 this.drawDropHint(dx, dishY, 40*s);
+             }
+
+             if(this.plantPos[id] === 2) {
+                 let t = this.dishLeaves[i].progress, end = this.dishLeaves[i].target;
+                 let r = 238 + (end[0]-238)*t, g = 255 + (end[1]-255)*t, b = 238 + (end[2]-238)*t;
+                 this.drawElodea(dx-25*s, dishY-10*s, 1.3*s, `rgb(${r},${g},${b})`, Math.PI/2);
+                 if(this.dishLeaves[i].isReacting && this.dishLeaves[i].progress < 1.0) this.dishLeaves[i].progress += 0.005; 
+             }
+          });
+
+          if(countInDish === 3) this.dropper.visible = true;
+          if(this.dropper.visible) {
+             let dx = this.dropper.x || this.width/2, dy = this.dropper.y || (this.isMobile?this.viewH*0.12:60);
+             let snapped = false;
+             ['A','B','C'].forEach((id,i)=>{
+                 let tx = this.isMobile ? this.width*0.17+i*this.width*0.33 : this.width*0.15+i*180;
+                 if(Math.abs(dx-tx)<30*s && Math.abs(dy-(dishY-100*s))<50*s) { dx = tx; dy = dishY-100*s; this.dropper.target = i; snapped=true; }
+             });
+             if(!snapped) this.dropper.target = -1;
+             
+             this.ctx.save(); this.ctx.translate(dx, dy); this.ctx.scale(s*1.2, s*1.2); // Made Dropper larger
+             // Highlight Dropper
+             this.ctx.shadowColor='rgba(255,100,50,0.5)'; this.ctx.shadowBlur=15;
+             this.ctx.fillStyle='#e35d4a'; this.ctx.beginPath(); this.ctx.ellipse(0,-6,13,15,0,0,Math.PI*2); this.ctx.fill();
+             this.ctx.shadowBlur=0;
+             this.ctx.fillStyle='rgba(255,255,255,0.7)'; this.ctx.fillRect(-6, 13, 12, 48);
+             this.ctx.beginPath(); this.ctx.moveTo(-6,61); this.ctx.lineTo(-1.6,77); this.ctx.lineTo(1.6,77); this.ctx.lineTo(6,61); this.ctx.fill();
+             this.ctx.fillStyle='rgba(139,69,19,0.9)'; this.ctx.fillRect(-4, 22, 8, 39);
+             this.ctx.restore();
+             
+             if(this.dropper.squeezing) {
+                 this.dropper.dy += 5;
+                 this.ctx.fillStyle='#8B4513'; this.ctx.beginPath(); this.ctx.arc(dx, this.dropper.dy, 5*s, 0, Math.PI*2); this.ctx.fill();
+                 if(this.dropper.dy > dishY) {
+                     this.dropper.squeezing = false;
+                     if(this.dropper.target > -1 && !this.dishLeaves[this.dropper.target].isReacting) {
+                         this.dishLeaves[this.dropper.target].isReacting = true; playSound('pop');
+                         if(this.dishLeaves.every(l=>l.isReacting)) {
+                             setTimeout(() => { this.callbacks.onComplete(3); }, 2000);
+                         }
+                     }
+                 }
+             }
+          }
+        }
+
+        if(this.dragItem && this.dragItem.type!=='dropper') {
+           if(this.dragItem.t) {
+               this.ctx.fillStyle='#fff'; this.ctx.beginPath(); this.ctx.roundRect(this.mouse.x-30, this.mouse.y-30, 60, 60, 15); this.ctx.fill(); this.ctx.stroke();
+               this.drawToolIcon(this.dragItem.t, this.mouse.x, this.mouse.y-3, 1.1);
+           }
+           if(this.dragItem.type==='move_to_bath') this.drawElodea(this.mouse.x, this.mouse.y, 1.2, '#006400');
+           if(this.dragItem.type==='move_to_dish') this.drawElodea(this.mouse.x, this.mouse.y, 1.2, '#eeffee');
+        }
+
+        this.animationId = requestAnimationFrame(this.loop);
+      }
+    }
+
+    const QUIZ_POOL = [
+      { q: "식물이 빛을 받아 광합성을 할 때는 이산화 탄소를 흡수한다.", a: true, explain: "광합성 과정에서 이산화 탄소를 원료로 사용합니다." },
+      { q: "빛이 없는 환경에서도 식물은 광합성을 계속한다.", a: false, explain: "광합성에는 빛에너지가 반드시 필요합니다." },
+      { q: "광합성이 활발하게 일어날 때, 용기 안의 이산화 탄소 농도는 감소한다.", a: true, explain: "광합성량이 호흡량보다 많아 이산화 탄소를 계속 흡수하기 때문입니다." },
+      { q: "식물은 낮에는 호흡을 하지 않고 광합성만 한다.", a: false, explain: "식물은 항상 호흡을 합니다." },
+      { q: "알루미늄 호일로 덮으면 광합성이 멈추고 호흡만 일어난다.", a: true, explain: "빛이 차단되면 생명 유지를 위한 호흡만 계속됩니다." },
+      { q: "호흡이 광합성보다 활발할 때 이산화 탄소 농도는 낮아진다.", a: false, explain: "호흡 결과 이산화 탄소가 방출되어 농도가 높아집니다." },
+      { q: "빛의 세기가 강해질수록 이산화 탄소 농도는 무한히 빠르게 감소한다.", a: false, explain: "빛이 일정 세기 이상 강해지면 광합성량은 더 이상 증가하지 않습니다." },
+      { q: "식물의 호흡 과정에서는 이산화 탄소가 발생한다.", a: true, explain: "호흡을 통해 산소를 마시고 이산화 탄소를 방출합니다." },
+      { q: "잎을 에탄올에 넣고 물중탕하는 이유는 엽록소를 제거하기 위함이다.", a: true, explain: "엽록소를 탈색해야 아이오딘 반응의 색 변화를 잘 관찰할 수 있습니다." },
+      { q: "광합성 결과 만들어진 녹말은 아이오딘 반응을 통해 청람색으로 변한다.", a: true, explain: "녹말은 아이오딘-아이오딘화 칼륨 용액과 반응하여 청람색을 띱니다." }
+    ];
+
+    const STAGE_HELPS = [
+      "<b>[광합성의 정의]</b><br>식물이 빛에너지를 이용하여 이산화탄소와 물을 원료로 양분(포도당)과 산소를 만들어내는 과정입니다.",
+      "<b>[MBL 센서 측정]</b><br>빛이 있는 조건에서 식물은 광합성을 통해 이산화탄소를 소모하고 산소를 방출합니다.<br>빨간색은 이산화탄소(CO₂), 파란색은 산소(O₂)입니다.",
+      "<b>[잎의 탈색]</b><br>엽록소의 초록색 때문에 아이오딘 반응 색깔 변화를 관찰하기 어렵습니다. 에탄올에 잎을 넣고 <b>가열판 전원(ON)</b>을 켜서 엽록소를 제거(탈색)합니다.",
+      "<b>[아이오딘 반응]</b><br>광합성 결과 만들어진 녹말은 아이오딘-아이오딘화 칼륨 용액과 반응하여 청람색을 띱니다.",
+      "<b>[개념 정리]</b><br>실험 결과를 종합하여 광합성에 필요한 물질(반응물)과 생성되는 물질(생성물)을 화학 반응식으로 정리합니다."
+    ];
+
+    const Modal = ({ isOpen, title, content, onClose, isConfirm, onConfirm }) => {
+      if (!isOpen) return null;
+      return (
+        <div className="fixed inset-0 z-[150] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-pop touch-none">
+          <div className="bg-white rounded-2xl w-full max-w-sm flex flex-col shadow-2xl overflow-hidden" style={{maxHeight: '80dvh'}}>
+            <div className="p-5 overflow-y-auto scrollable-panel pointer-events-auto">
+              <h3 className="text-xl font-bold text-gray-800 mb-3">{title}</h3>
+              <div className="text-gray-600 text-sm whitespace-pre-line leading-relaxed" dangerouslySetInnerHTML={{__html: content}}></div>
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex justify-end gap-2 shrink-0 pointer-events-auto">
+              {isConfirm && <button onClick={onClose} className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-bold">취소</button>}
+              <button onClick={isConfirm ? onConfirm : onClose} className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold">확인</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const AdminGuide = ({ isOpen, onClose }) => {
+      const [copied, setCopied] = useState(false);
+      const code = `function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(['시간', '학번', '이름', 'MBL오류', '분류오류', '반응식오류', 'OX점수', '알게된점']);
+    sheet.getRange(1, 1, 1, sheet.getLastColumn()).setFontWeight('bold').setBackground('#4a86e8').setFontColor('#ffffff');
+  }
+  var data = JSON.parse(e.postData.contents);
+  sheet.appendRow([data.timestamp, data.studentId, data.studentName, data.mblErrors, data.quiz1Errors, data.quiz2Errors, data.quizScore, data.insight]);
+  return ContentService.createTextOutput(JSON.stringify({ result: 'success' })).setMimeType(ContentService.MimeType.JSON);
+}`;
+      const handleCopy = () => {
+        const ta = document.createElement('textarea'); ta.value = code; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+        setCopied(true); setTimeout(() => setCopied(false), 2000);
+      };
+      if (!isOpen) return null;
+      return (
+        <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex flex-col p-4 animate-pop touch-none">
+          <div className="max-w-2xl w-full mx-auto bg-white rounded-2xl shadow-xl overflow-hidden mt-8 flex flex-col pointer-events-auto" style={{maxHeight: '80dvh'}}>
+            <div className="bg-green-700 text-white p-4 flex justify-between items-center shrink-0">
+              <h2 className="font-bold">⚙️ DB 연동 가이드</h2>
+              <button onClick={onClose} className="text-2xl leading-none">&times;</button>
+            </div>
+            <div className="p-5 overflow-y-auto scrollable-panel text-sm text-gray-700 space-y-3">
+              <p><b>1. 구글 시트 준비:</b> 새 스프레드시트 생성.</p>
+              <p><b>2. Apps Script 작성:</b> 확장 프로그램 &gt; Apps Script에 아래 코드 붙여넣기.</p>
+              <div className="relative">
+                <pre className="bg-gray-100 p-3 rounded-lg overflow-x-auto text-xs">{code}</pre>
+                <button onClick={handleCopy} className="absolute top-2 right-2 bg-green-600 text-white px-2 py-1 rounded text-xs">{copied ? '✅ 복사됨' : '복사'}</button>
+              </div>
+              <p><b>3. 배포:</b> 새 배포 &gt; 웹 앱 &gt; 모든 사용자.</p>
+              <p><b>4. URL 적용:</b> 발급된 URL을 소스 최상단 <code>GOOGLE_SCRIPT_URL</code>에 붙여넣으세요.</p>
+            </div>
+            <div className="text-center pb-3 text-xs text-gray-400 shrink-0">Created by Yang DH</div>
+          </div>
+        </div>
+      );
+    };
+
+    const DragDropQuiz = ({ onComplete, onError, onQuizError }) => {
+      const [phase, setPhase] = useState(1);
+      const [deck, setDeck] = useState([{id:1, v:'이산화탄소'},{id:2, v:'물'},{id:3, v:'빛에너지'},{id:4, v:'산소'},{id:5, v:'포도당(녹말)'}]);
+      const [inBin, setInBin] = useState([]); const [outBin, setOutBin] = useState([]);
+      const [slots, setSlots] = useState({1:null, 2:null, 3:null, 4:null, 5:null});
+      const [active, setActive] = useState(null);
+
+      const handleCardTap = (card, source) => {
+        if(!active) setActive({card, source});
+        else if(active.card.id === card.id) setActive(null);
+      };
+      
+      const handleDrop = (targetType, slotId=null) => {
+        if(!active) return;
+        const {card, source} = active;
+        const removeFromSource = () => {
+          if(source==='deck') setDeck(d=>d.filter(c=>c.id!==card.id));
+          if(source==='inBin') setInBin(d=>d.filter(c=>c.id!==card.id));
+          if(source==='outBin') setOutBin(d=>d.filter(c=>c.id!==card.id));
+          if(source.startsWith('slot')) setSlots(s=>({...s, [source.split('-')[1]]: null}));
+        };
+        if(phase===1) {
+          if(targetType==='in') { removeFromSource(); setInBin(prev=>[...prev, card]); }
+          if(targetType==='out') { removeFromSource(); setOutBin(prev=>[...prev, card]); }
+        } else {
+          if(targetType==='slot') {
+             const existing = slots[slotId];
+             if(existing) setDeck(d=>[...d, existing]);
+             removeFromSource();
+             setSlots(s=>({...s, [slotId]: card}));
+          }
+        }
+        setActive(null);
+      };
+
+      const checkPhase1 = () => {
+        const inOk = inBin.every(c=>['이산화탄소','물','빛에너지'].includes(c.v)) && inBin.length===3;
+        const outOk = outBin.every(c=>['산소','포도당(녹말)'].includes(c.v)) && outBin.length===2;
+        if(inOk && outOk) { playSound('success'); setPhase(2); setDeck([{id:1, v:'이산화탄소'},{id:2, v:'물'},{id:3, v:'빛에너지'},{id:4, v:'산소'},{id:5, v:'포도당(녹말)'}]); }
+        else { playSound('error'); onError('분류가 올바르지 않습니다.'); if(onQuizError) onQuizError('quiz1'); }
+      };
+      const checkPhase2 = () => {
+        const l = [slots[1]?.v, slots[2]?.v], r = [slots[4]?.v, slots[5]?.v];
+        const isLeftOk = l.includes('이산화탄소') && l.includes('물');
+        const isLightOk = slots[3]?.v === '빛에너지';
+        const isRightOk = r.includes('산소') && r.includes('포도당(녹말)');
+
+        if(isLeftOk && isLightOk && isRightOk) {
+          playSound('cheer'); onComplete();
+        } else { 
+          playSound('error'); 
+          if(onQuizError) onQuizError('quiz2'); 
+          
+          let toDeck = [];
+          let newSlots = { ...slots };
+          let msgs = [];
+
+          if (!isLeftOk) {
+            msgs.push("반응물");
+            if (slots[1]) { toDeck.push(slots[1]); newSlots[1] = null; }
+            if (slots[2]) { toDeck.push(slots[2]); newSlots[2] = null; }
+          }
+          if (!isLightOk) {
+            msgs.push("에너지 조건");
+            if (slots[3]) { toDeck.push(slots[3]); newSlots[3] = null; }
+          }
+          if (!isRightOk) {
+            msgs.push("생성물");
+            if (slots[4]) { toDeck.push(slots[4]); newSlots[4] = null; }
+            if (slots[5]) { toDeck.push(slots[5]); newSlots[5] = null; }
+          }
+          
+          setDeck(prev => [...prev, ...toDeck]);
+          setSlots(newSlots);
+          onError(`<b>${msgs.join(', ')}</b>이(가) 올바르지 않습니다.\n틀린 카드는 제자리로 돌아갑니다.`);
+        }
+      };
+
+      return (
+        <div className="absolute inset-0 bg-[#f2f8f1] z-[60] flex flex-col items-center pt-8 px-2 pointer-events-auto">
+          <h2 className="font-bold text-[#54705b] mb-4 text-center mt-6">{phase===1 ? '카드를 탭하고 알맞은 상자를 탭하세요.' : '빈칸을 탭하여 광합성 식을 완성하세요.'}</h2>
+          <div className="flex flex-wrap justify-center min-h-[50px] mb-4 w-full">
+            {deck.map(c => <div key={c.id} onClick={()=>handleCardTap(c, 'deck')} className={`dnd-card ${active?.card.id===c.id ? 'ring-2 ring-orange-500 scale-105' : ''}`}>{c.v}</div>)}
+          </div>
+          {phase === 1 && (
+            <div className="flex gap-4 w-full max-w-md justify-center">
+              <div onClick={()=>handleDrop('in')} className={`flex-1 bin ${active ? 'bg-green-50 border-green-400' : ''} border-2 border-dashed border-[#a9c5a3] rounded-2xl p-2 min-h-[120px] flex flex-col items-center`}>
+                <h3 className="font-bold text-[#1a7431] text-sm mb-2">광합성에 필요한 것📥</h3>
+                <div className="flex flex-wrap justify-center">{inBin.map(c=><div key={c.id} onClick={(e)=>{e.stopPropagation(); handleCardTap(c, 'inBin');}} className={`dnd-card small ${active?.card.id===c.id?'ring-2 ring-orange-500':''}`}>{c.v}</div>)}</div>
+              </div>
+              <div onClick={()=>handleDrop('out')} className={`flex-1 bin ${active ? 'bg-blue-50 border-blue-400' : ''} border-2 border-dashed border-[#a9c5a3] rounded-2xl p-2 min-h-[120px] flex flex-col items-center`}>
+                <h3 className="font-bold text-[#1a7431] text-sm mb-2">만들어진 물질📤</h3>
+                <div className="flex flex-wrap justify-center">{outBin.map(c=><div key={c.id} onClick={(e)=>{e.stopPropagation(); handleCardTap(c, 'outBin');}} className={`dnd-card small ${active?.card.id===c.id?'ring-2 ring-orange-500':''}`}>{c.v}</div>)}</div>
+              </div>
+            </div>
+          )}
+          {phase === 2 && (
+            <div className="flex items-center justify-center gap-1 w-full max-w-lg mt-4 px-2 overflow-x-auto">
+              <div onClick={()=>handleDrop('slot',1)} className="dnd-slot w-16 h-12 flex-shrink-0">{slots[1]&&<div onClick={(e)=>{e.stopPropagation(); handleCardTap(slots[1], 'slot-1');}} className="dnd-card small m-0">{slots[1].v}</div>}</div>
+              <div className="font-bold">+</div>
+              <div onClick={()=>handleDrop('slot',2)} className="dnd-slot w-16 h-12 flex-shrink-0">{slots[2]&&<div onClick={(e)=>{e.stopPropagation(); handleCardTap(slots[2], 'slot-2');}} className="dnd-card small m-0">{slots[2].v}</div>}</div>
+              <div className="flex flex-col items-center mx-1">
+                <div onClick={()=>handleDrop('slot',3)} className="dnd-slot w-16 h-12 bg-yellow-50 border-yellow-400 mb-1 flex-shrink-0">{slots[3]&&<div onClick={(e)=>{e.stopPropagation(); handleCardTap(slots[3], 'slot-3');}} className="dnd-card small m-0">{slots[3].v}</div>}</div>
+                <div className="text-[#54705b] text-xs">⬇</div><div className="text-[#2f9e44] font-bold">➡</div>
+              </div>
+              <div onClick={()=>handleDrop('slot',4)} className="dnd-slot w-16 h-12 flex-shrink-0">{slots[4]&&<div onClick={(e)=>{e.stopPropagation(); handleCardTap(slots[4], 'slot-4');}} className="dnd-card small m-0">{slots[4].v}</div>}</div>
+              <div className="font-bold">+</div>
+              <div onClick={()=>handleDrop('slot',5)} className="dnd-slot w-16 h-12 flex-shrink-0">{slots[5]&&<div onClick={(e)=>{e.stopPropagation(); handleCardTap(slots[5], 'slot-5');}} className="dnd-card small m-0">{slots[5].v}</div>}</div>
+            </div>
+          )}
+          <button onClick={phase===1 ? checkPhase1 : checkPhase2} className="mt-8 px-6 py-3 bg-[#2f9e44] hover:bg-[#248035] text-white font-bold rounded-xl shadow-lg">정답 확인</button>
+        </div>
+      );
+    };
+
+    const App = () => {
+      const [view, setView] = useState('intro'); 
+      const [simStage, setSimStage] = useState(1);
+      const [stageCompleted, setStageCompleted] = useState([false, false, false, false, false]);
+      const [showAdmin, setShowAdmin] = useState(false);
+      const [modal, setModal] = useState({ isOpen: false, title: '', content: '', isConfirm: false, onConfirm: null });
+      const [toastMsg, setToastMsg] = useState(null);
+      
+      const canvasRef = useRef(null);
+      const effectCanvasRef = useRef(null);
+      const engineRef = useRef(null);
+
+      const [formData, setFormData] = useState({ studentId: '', studentName: '', insight: '' });
+      const [quizzes, setQuizzes] = useState([]);
+      const [quizAnswers, setQuizAnswers] = useState([null, null, null]);
+      const [showQuizHint, setShowQuizHint] = useState([false, false, false]);
+      const [isSubmitting, setIsSubmitting] = useState(false);
+      const [errorCounts, setErrorCounts] = useState({ mbl: 0, quiz1: 0, quiz2: 0 });
+
+      const navigate = useCallback((nextView) => {
+        setView(nextView);
+        history.pushState({ view: nextView }, '');
+      }, []);
+
+      useEffect(() => {
+        history.replaceState({ view: 'intro' }, '');
+        const onPop = (e) => {
+          const v = e.state?.view;
+          setView(['intro', 'simulation', 'report'].includes(v) ? v : 'intro');
+        };
+        window.addEventListener('popstate', onPop);
+        return () => window.removeEventListener('popstate', onPop);
+      }, []);
+
+      const initCanvas = useCallback(() => {
+        if (!engineRef.current && canvasRef.current && effectCanvasRef.current) {
+          engineRef.current = new PhotosynthesisEngine(canvasRef.current, effectCanvasRef.current, {
+            onToast: (msg) => { setToastMsg(msg); setTimeout(()=>setToastMsg(null), 2000); },
+            onReady: (type) => { if(type === 'mbl') document.getElementById('mbl-start-btn').style.display='block'; },
+            onComplete: (stage) => {
+              setStageCompleted(prev => { const n=[...prev]; n[stage]=true; return n; });
+              if(stage===1) setModal({isOpen:true, title:'실험 결과', content:'시험관 A에서만 광합성이 활발하여\nCO₂는 줄고 O₂는 늘어났습니다.'});
+              if(stage===2) setModal({isOpen:true, title:'안내', content:'잎의 탈색이 완료되었습니다.'});
+              if(stage===3) setModal({isOpen:true, title:'실험 결과', content:'A 접시(빛+CO₂)만 청람색으로 변해\n녹말이 생성되었음을 확인했습니다.'});
+            },
+            onInteractionError: (type) => {
+              setErrorCounts(prev => ({ ...prev, [type]: prev[type] + 1 }));
+            }
+          });
+          const ro = new ResizeObserver(() => engineRef.current?.resize());
+          ro.observe(canvasRef.current.parentElement);
+        } else if (engineRef.current && canvasRef.current && effectCanvasRef.current) {
+          engineRef.current.canvas = canvasRef.current;
+          engineRef.current.ctx = canvasRef.current.getContext('2d');
+          engineRef.current.effectCanvas = effectCanvasRef.current;
+          engineRef.current.effectCtx = effectCanvasRef.current.getContext('2d');
+        }
+      }, []);
+
+      useEffect(() => {
+        if (view === 'intro' || view === 'simulation') {
+          setTimeout(initCanvas, 0); // DOM 렌더링 직후 연결 보장
+        }
+        if(engineRef.current) engineRef.current.setStage(view === 'intro' ? 0 : simStage);
+      }, [view, simStage, initCanvas]);
+
+      useEffect(() => {
+        if (view === 'report' && quizzes.length === 0) {
+          setQuizzes([...QUIZ_POOL].sort(() => 0.5 - Math.random()).slice(0, 3));
+        }
+      }, [view, quizzes.length]);
+
+      const resetSim = () => {
+         if(engineRef.current) engineRef.current.resetState();
+         setSimStage(1);
+         setStageCompleted([false, false, false, false, false]);
+         setQuizzes([]);
+         setQuizAnswers([null, null, null]);
+         setShowQuizHint([false, false, false]);
+         setFormData({ studentId: '', studentName: '', insight: '' });
+         setErrorCounts({ mbl: 0, quiz1: 0, quiz2: 0 });
+      };
+
+      const submitData = async () => {
+        if (!formData.studentId.trim() || !formData.studentName.trim() || !formData.insight.trim() || quizAnswers.includes(null)) {
+          setModal({ isOpen: true, title: "입력 오류", content: "모든 항목을 입력하고 퀴즈를 풀어주세요." }); return;
+        }
+        if (!GOOGLE_SCRIPT_URL) {
+          setModal({ isOpen: true, title: "안내", content: "DB 연동 URL이 설정되지 않았습니다." }); return;
+        }
+        setIsSubmitting(true);
+        const score = quizAnswers.filter((ans, i) => ans === quizzes[i].a).length * 100 / 3;
+        try {
+          await Promise.race([
+            fetch(GOOGLE_SCRIPT_URL, {
+              method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' },
+              body: JSON.stringify({ timestamp: new Date().toLocaleString(), ...formData, mblErrors: errorCounts.mbl, quiz1Errors: errorCounts.quiz1, quiz2Errors: errorCounts.quiz2, quizScore: Math.round(score) })
+            }),
+            new Promise((_, r) => setTimeout(() => r(new Error("Timeout")), 8000))
+          ]);
+          navigate('done');
+        } catch (error) {
+          setModal({ isOpen: true, title: "오류", content: "제출 실패. 네트워크를 확인하세요." });
+        } finally { setIsSubmitting(false); }
+      };
+
+      const renderIntro = () => (
+        <div className="absolute inset-0 z-10 flex flex-col justify-end p-6 bg-transparent pointer-events-none" style={{paddingBottom: 'max(40px, var(--safe-bottom))'}}>
+          <div className="bg-white/90 backdrop-blur-md p-6 rounded-3xl shadow-xl w-full max-w-md mx-auto text-center border border-white/50 animate-pop pointer-events-auto">
+            <h1 className="text-2xl font-black text-green-800 mb-2">광합성 가상 실험</h1>
+            <p className="text-gray-600 mb-6 text-sm leading-relaxed">식물이 빛에너지를 이용해 양분을 만드는<br/>광합성 과정을 단계별로 탐구해봅시다.</p>
+            <button onClick={() => navigate('simulation')} className="w-full py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-lg shadow-lg">실험 시작하기</button>
+          </div>
+        </div>
+      );
+
+      const renderSimulation = () => (
+        <div className="absolute inset-0 pointer-events-none z-20 flex flex-col">
+          <div className="w-full px-4 py-3 flex justify-between pointer-events-none absolute top-0 left-0 z-50 flex-wrap" style={{ paddingTop: 'max(16px, var(--safe-top))' }}>
+            <button onClick={() => setModal({isOpen:true, title:'💡 도움말', content: STAGE_HELPS[simStage-1] || '퀴즈를 풀어보세요.'})} className="pointer-events-auto bg-white/90 backdrop-blur text-green-800 px-4 py-2 rounded-full text-sm font-bold shadow-sm border border-green-200">💡 설명</button>
+            <button onClick={() => setShowAdmin(true)} className="pointer-events-auto bg-white/90 backdrop-blur text-gray-700 px-4 py-2 rounded-full text-sm font-bold shadow-sm">⚙️ 가이드</button>
+          </div>
+          
+          <div className="w-full text-center pointer-events-none font-bold text-green-900 drop-shadow-md bg-white/50 py-2 mt-[60px] z-40 backdrop-blur-sm">
+            {["1. MBL 측정", "2. 탈색하기", "3. 아이오딘 반응", "4. 개념 정리 퀴즈"][simStage-1]}
+          </div>
+
+          {simStage === 4 && <div className="pointer-events-auto w-full h-full z-50"><DragDropQuiz onError={msg => setModal({isOpen:true, title:'알림', content:msg})} onQuizError={(phase) => setErrorCounts(prev => ({ ...prev, [phase]: prev[phase] + 1 }))} onComplete={() => {
+              setStageCompleted(prev => { const n=[...prev]; n[4]=true; return n; });
+              setModal({isOpen:true, title:'완료!', content:'모든 과정을 마쳤습니다.\n보고서를 작성해주세요.'});
+          }} /></div>}
+
+          {/* Fixed bottom controls ensures it's always visible above canvas */}
+          <div className="fixed bottom-0 left-0 w-full px-4 py-4 flex justify-between items-center pointer-events-none z-[100]" style={{ paddingBottom: 'max(16px, var(--safe-bottom))' }}>
+             <button onClick={() => setSimStage(s => Math.max(1, s-1))} className={`pointer-events-auto bg-white border border-gray-300 text-gray-700 px-5 py-3 rounded-xl font-bold shadow-xl ${simStage===1 ? 'opacity-0' : ''}`}>⬅ 이전</button>
+             {simStage === 1 && <button id="mbl-start-btn" style={{display:'none'}} onClick={()=>{engineRef.current.mblData.running=true; playSound('pop'); document.getElementById('mbl-start-btn').style.display='none';}} className="pointer-events-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold shadow-xl animate-bounce">측정 시작 📊</button>}
+             {simStage < 4 ? (
+               <button disabled={!stageCompleted[simStage]} onClick={() => setSimStage(s => s+1)} className="pointer-events-auto bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:text-gray-500 text-white px-5 py-3 rounded-xl font-bold shadow-xl">다음 ➡</button>
+             ) : (
+               <button disabled={!stageCompleted[4]} onClick={() => navigate('report')} className="pointer-events-auto bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 text-white px-5 py-3 rounded-xl font-bold shadow-xl animate-pulse">보고서 쓰기 📝</button>
+             )}
+          </div>
+        </div>
+      );
+
+      const renderReport = () => (
+        <div className="absolute inset-0 bg-white z-[80] flex flex-col pointer-events-auto">
+           <header className="flex items-center justify-between p-4 border-b border-gray-200 shrink-0 bg-white shadow-sm z-10" style={{ paddingTop: 'max(16px, var(--safe-top))' }}>
+              <button onClick={() => navigate('simulation')} className="text-gray-500 font-bold px-2 py-1">&larr; 실험으로</button>
+              <h2 className="font-bold text-lg text-gray-800">최종 보고서</h2>
+              <button onClick={()=>{ 
+                setModal({ 
+                  isOpen:true, 
+                  title:'경고', 
+                  content:'지금까지의 실험 진행 상황과 작성한 보고서 내용이 모두 삭제됩니다.\n정말 초기화하시겠습니까?', 
+                  isConfirm:true, 
+                  onConfirm: () => { resetSim(); navigate('intro'); setModal({isOpen:false}); } 
+                }); 
+              }} className="text-sm font-bold text-red-500 px-2 py-1">초기화</button>
+           </header>
+           
+           <div className="flex-1 overflow-y-auto scrollable-panel p-4 pb-32 space-y-6">
+              <section className="space-y-4 max-w-2xl mx-auto">
+                 <div className="flex gap-3">
+                    <input type="text" placeholder="학번" value={formData.studentId} onChange={e=>setFormData({...formData, studentId:e.target.value})} className="w-1/3 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500" />
+                    <input type="text" placeholder="이름" value={formData.studentName} onChange={e=>setFormData({...formData, studentName:e.target.value})} className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500" />
+                 </div>
+                 <div className="bg-green-50 p-4 rounded-xl border border-green-200 mt-2">
+                    <h4 className="font-bold text-green-800 text-sm mb-2">📝 실험 결과 요약 안내</h4>
+                    <ul className="text-sm text-green-700 list-disc pl-5 space-y-1">
+                       <li>A 시험관에서 CO₂와 O₂는 어떻게 변했나요?</li>
+                       <li>B, C 시험관에서는 왜 광합성이 잘 일어나지 않았나요?</li>
+                       <li>아이오딘 반응에서 청람색이 나타난 접시는 무엇이며, 그 이유는 무엇인가요?</li>
+                    </ul>
+                 </div>
+                 <textarea placeholder="위 안내 질문에 대한 답을 포함하여 실험 결과를 통해 알게 된 점을 자세히 적어주세요." value={formData.insight} onChange={e=>setFormData({...formData, insight:e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 h-40 resize-none outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"></textarea>
+              </section>
+
+              <section className="max-w-2xl mx-auto bg-gray-50 rounded-2xl p-5 border border-gray-200">
+                 <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">🧠 마무리 OX 퀴즈</h3>
+                 <div className="space-y-4">
+                    {quizzes.map((q, i) => (
+                      <div key={i} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                        <p className="font-bold text-sm text-gray-700 mb-3">Q{i+1}. {q.q}</p>
+                        <div className="flex gap-2 mb-2">
+                          <button onClick={() => { let n=[...quizAnswers]; n[i]=true; setQuizAnswers(n); let h=[...showQuizHint]; h[i]=true; setShowQuizHint(h); }} className={`flex-1 py-3 rounded-lg font-bold border transition-colors ${quizAnswers[i]===true ? 'bg-green-100 border-green-500 text-green-700 shadow-inner' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'}`}>O</button>
+                          <button onClick={() => { let n=[...quizAnswers]; n[i]=false; setQuizAnswers(n); let h=[...showQuizHint]; h[i]=true; setShowQuizHint(h); }} className={`flex-1 py-3 rounded-lg font-bold border transition-colors ${quizAnswers[i]===false ? 'bg-red-100 border-red-500 text-red-700 shadow-inner' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'}`}>X</button>
+                        </div>
+                        {showQuizHint[i] && (
+                          <div className={`text-xs p-3 rounded-lg mt-2 ${quizAnswers[i] === q.a ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+                            <span className="font-bold">{quizAnswers[i] === q.a ? '정답입니다!' : '오답입니다.'}</span><br/>{q.explain}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                 </div>
+              </section>
+           </div>
+           
+           <div className="absolute bottom-0 left-0 w-full p-4 bg-white/90 backdrop-blur border-t border-gray-200 shrink-0 z-20" style={{ paddingBottom: 'max(16px, var(--safe-bottom))' }}>
+              <button onClick={submitData} disabled={isSubmitting} className="w-full max-w-2xl mx-auto block py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-lg shadow-lg disabled:opacity-50 transition-all">{isSubmitting ? '전송 중...' : '✅ 결과 제출하기'}</button>
+           </div>
+        </div>
+      );
+
+      const renderDone = () => (
+        <div className="absolute inset-0 bg-green-50 z-[90] flex flex-col items-center justify-center p-6 pointer-events-auto">
+          <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full text-center animate-pop">
+            <div className="text-6xl mb-4">🎉</div>
+            <h1 className="text-2xl font-black text-green-800 mb-2">제출 완료!</h1>
+            <p className="text-gray-600 mb-6 text-sm">보고서가 전송되었습니다.</p>
+            <div className="bg-green-50 p-4 rounded-xl mb-8">
+              <div className="text-sm text-green-800 font-bold">OX 퀴즈 점수</div>
+              <div className="text-4xl font-black text-green-600 mt-2">{Math.round(quizAnswers.filter((a,i)=>a===quizzes[i]?.a).length*100/3)}점</div>
+            </div>
+            <button onClick={() => { resetSim(); navigate('intro'); }} className="w-full py-4 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-bold shadow-lg">처음으로 돌아가기</button>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="h-screen-safe w-full relative overflow-hidden bg-[#f2f8f1]">
+          <div className="absolute inset-0 z-0">
+             <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full block touch-none"></canvas>
+             <canvas ref={effectCanvasRef} className="absolute top-0 left-0 w-full h-full pointer-events-none block"></canvas>
+          </div>
+          
+          {view === 'intro' && renderIntro()}
+          {view === 'simulation' && renderSimulation()}
+          {view === 'report' && renderReport()}
+          {view === 'done' && renderDone()}
+          
+          <Modal {...modal} onClose={() => setModal({ ...modal, isOpen: false })} />
+          <AdminGuide isOpen={showAdmin} onClose={() => setShowAdmin(false)} />
+          {toastMsg && <div className="fixed top-1/3 left-1/2 -translate-x-1/2 bg-gray-800/90 backdrop-blur text-white px-5 py-3 rounded-full z-[200] font-bold shadow-2xl animate-pop pointer-events-none">{toastMsg}</div>}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
