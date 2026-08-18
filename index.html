@@ -169,6 +169,17 @@
         this.animationId = requestAnimationFrame(this.loop);
       }
 
+      get scale() {
+        if (!this.canvas) return 1;
+        if (this.width < 768) {
+            // 하단 UI(약 120px)를 뺀 가용 높이와 너비 중 더 좁은 비율에 맞춰 전체 기구 스케일 축소
+            let hScale = (this.height - 120) / 450; 
+            let wScale = this.width / 380;
+            return Math.max(0.45, Math.min(1.0, hScale, wScale));
+        }
+        return 1.3; // 데스크탑/태블릿 기본 스케일
+      }
+
       resetState() {
         this.introParticles = []; this.starchChain = []; this.particles = [];
         this.dragItem = null; this.mouse = {x:0, y:0, down:false};
@@ -222,15 +233,23 @@
       }
 
       initMBLPositions() {
-        let ty, startX, gap, toolY;
+        let s = this.scale;
+        let startX, gap, ty, toolY;
+        let tubeW = 70 * s;
+        let tubeH = 180 * s;
+
         if(this.isMobile) {
-           ty = this.height * 0.16; // 모바일 화면 비율에 맞춰 16% 위치로 조정
+           ty = this.height * 0.12; 
            startX = this.width * 0.12; 
-           gap = this.width * 0.3; 
-           toolY = ty + 190; // 시험관 바로 아래에 도구 배치
+           gap = (this.width - startX*2 - tubeW) / 2; // 중앙 정렬되게 간격 자동 분배
+           toolY = ty + tubeH + 45*s; // 튜브 밑에 여유있게 도구 배치
         } else {
-           ty = this.height * 0.35; startX = this.width * 0.1; gap = this.width * 0.13; toolY = this.height - 100;
+           ty = this.height * 0.35; 
+           startX = this.width * 0.1; 
+           gap = this.width * 0.13; 
+           toolY = this.height - 120;
         }
+
         if(!this.tubes) {
             this.tubes = [
             {id:'A', l:'빛+CO₂', x:startX, y:ty, req:{p:1,l:1,c:1,f:0}, has:{p:0,l:0,c:0,f:0}, co2Anim:0, co2MsgY:0 },
@@ -243,8 +262,8 @@
             this.tubes[2].x = startX+gap*2; this.tubes[2].y = ty;
         }
 
-        let tx = this.isMobile ? this.width * 0.2 : startX;
-        let tStep = this.isMobile ? this.width/5 : 90;
+        let tx = startX;
+        let tStep = this.isMobile ? (this.width - startX*2)/3 : 90*s;
         this.tools = [
           {n:'검정말', t:'plant', i:'🌿', x:tx}, {n:'CO₂', t:'co2', i:'💨', x:tx+tStep},
           {n:'전등', t:'lamp', i:'💡', x:tx+tStep*2}, {n:'은박지', t:'foil', i:'⬜', x:tx+tStep*3}
@@ -258,14 +277,16 @@
         if(this.stage === 1) {
           if(!this.mblData.running && !this.mblData.done) {
             if(this.dragItem && this.heldTool){ this.placeMBLTool(); return; }
-            this.tools.forEach(t => {
-              if(Math.hypot(t.x-this.mouse.x, t.y-this.mouse.y)<40){
+            let s = this.scale;
+            for (let t of this.tools) {
+              if(Math.hypot(t.x-this.mouse.x, t.y-this.mouse.y) < 40*s){
                 this.dragItem=t; this.heldTool=false; this.downPos={x:this.mouse.x, y:this.mouse.y};
+                break; // 하나 잡으면 루프 종료 (중복 획득 방지)
               }
-            });
+            }
           }
         } else if(this.stage === 2) {
-          let s = this.isMobile ? 0.9 : 1.3; // 모바일에서 겹치지 않게 0.9로 축소
+          let s = this.scale;
           const hx = this.isMobile ? this.width/2 : this.width*0.75;
           const hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           const btnX = hx+52*s, btnY = hy+30*s;
@@ -276,23 +297,30 @@
           }
           const ty = this.isMobile ? this.height*0.15 : (this.height*0.7 - 240*s);
           const startX = this.width*0.1;
-          ['A','B','C'].forEach((id,i)=>{
+          const ids = ['A', 'B', 'C'];
+          for (let i = 0; i < ids.length; i++) {
+             let id = ids[i];
              let tx = startX + i*(this.isMobile ? this.width*0.3 : this.width*0.15);
              if(this.plantPos[id]===0 && Math.hypot(this.mouse.x-(tx+35*s), this.mouse.y-(ty+130*s)) < 50*s) {
-                 this.dragItem = {type:'move_to_bath', id:id, prevPos: 0}; this.plantPos[id] = 99;
+                 this.dragItem = {type:'move_to_bath', id:id, prevPos: 0}; 
+                 this.plantPos[id] = 99;
+                 break; // 식물 증발 버그 원천 차단
              }
-          });
+          }
         } else if(this.stage === 3) {
-          let s = this.isMobile ? 0.9 : 1.3;
+          let s = this.scale;
           let hx = this.isMobile ? this.width/2 : this.width*0.75;
           let hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           
-          ['A', 'B', 'C'].forEach((id, i) => {
+          const ids = ['A', 'B', 'C'];
+          for (let i = 0; i < ids.length; i++) {
+            let id = ids[i];
             if(this.plantPos[id] === 1 && Math.hypot(this.mouse.x-(hx-30*s+i*30*s), this.mouse.y-(hy-20*s)) < 25*s) {
                  this.dragItem = {type:'move_to_dish', id:id, prevPos: 1}; 
                  this.plantPos[id] = 99;
+                 break; // 식물 증발 버그 원천 차단
             }
-          });
+          }
           const dishY = this.isMobile ? this.height*0.35 + 20 : this.height*0.55 + 40;
           if(this.dropper.visible && !this.dropper.squeezing) {
              let dx = this.dropper.x || this.width/2, dy = this.dropper.y || (this.isMobile ? this.height*0.12 : 60);
@@ -329,14 +357,14 @@
           }
           this.placeMBLTool();
         } else if(this.stage === 2 && this.dragItem.type==='move_to_bath') {
-          let s = this.isMobile ? 0.9 : 1.3;
+          let s = this.scale;
           const hx = this.isMobile ? this.width/2 : this.width*0.75;
           const hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           if(Math.hypot(this.mouse.x-hx, this.mouse.y-(hy-60*s)) < 100*s) { 
               this.plantPos[this.dragItem.id] = 1; playSound('pop'); 
           } else { this.plantPos[this.dragItem.id] = this.dragItem.prevPos || 0; } 
         } else if(this.stage === 3) {
-          let s = this.isMobile ? 0.9 : 1.3;
+          let s = this.scale;
           const dishY = this.isMobile ? this.height*0.35 + 20 : this.height*0.55 + 40;
           if(this.dragItem.type==='dropper') {
             const moved = this.downPos ? Math.hypot(this.mouse.x-this.downPos.x, this.mouse.y-this.downPos.y) : 99;
@@ -357,16 +385,17 @@
       }
 
       placeMBLTool() {
-        const lampGap = this.isMobile ? 112 : 146; 
+        let s = this.scale;
+        const lampGap = this.isMobile ? 112*s : 146*s; 
         this.tubes.forEach(t => {
-          const top = (this.dragItem.t === 'lamp') ? (t.y - lampGap - 34) : (t.y - 24);
-          const bottom = t.y + 204;
-          if(Math.abs(this.mouse.x - (t.x + 35)) < 52 && this.mouse.y > top && this.mouse.y < bottom) {
+          const top = (this.dragItem.t === 'lamp') ? (t.y - lampGap - 34*s) : (t.y - 24*s);
+          const bottom = t.y + 204*s;
+          if(Math.abs(this.mouse.x - (t.x + 35*s)) < 52*s && this.mouse.y > top && this.mouse.y < bottom) {
              let d = this.dragItem.t; let valid = false;
              if(d==='plant'&&t.req.p) { t.has.p=1; valid=true; }
              else if(d==='foil'&&t.req.f) { t.has.f=1; valid=true; }
              else if(d==='lamp'&&t.req.l) { t.has.l=1; valid=true; }
-             else if(d==='co2'&&t.req.c) { t.has.c=1; t.co2Anim=100; t.co2MsgY=t.y+130; valid=true; }
+             else if(d==='co2'&&t.req.c) { t.has.c=1; t.co2Anim=100; t.co2MsgY=t.y+130*s; valid=true; }
              if(valid) playSound('pop');
              else { 
                playSound('error'); 
@@ -392,10 +421,10 @@
         this.ctx.restore();
       }
 
-      drawFoil(x, y, w, h) {
+      drawFoil(x, y, w, h, s) {
         this.ctx.save();
-        const pad = 6;
-        const fx = x - pad, fy = y - 9, fw = w + pad*2, fh = h + 16;
+        const pad = 6*s;
+        const fx = x - pad, fy = y - 9*s, fw = w + pad*2, fh = h + 16*s;
         const r = fw/2, bodyH = fh - r;
         const path = () => {
             this.ctx.beginPath(); this.ctx.moveTo(fx, fy); this.ctx.lineTo(fx, fy+bodyH);
@@ -411,40 +440,40 @@
             const r1 = Math.abs(Math.sin(i*12.9898)*43758.5453) % 1;
             const r2 = Math.abs(Math.sin(i*78.233 )*43758.5453) % 1;
             const r3 = Math.abs(Math.sin(i*39.425 )*24634.6345) % 1;
-            const px = fx + r1*fw, py = fy + r2*fh; const sz = 4 + r3*6;
-            this.ctx.beginPath(); this.ctx.moveTo(px, py); this.ctx.lineTo(px + sz, py + sz*0.8 + 3); this.ctx.lineTo(px - sz*0.7, py + sz*1.5 + 4); this.ctx.closePath();
+            const px = fx + r1*fw, py = fy + r2*fh; const sz = (4 + r3*6)*s;
+            this.ctx.beginPath(); this.ctx.moveTo(px, py); this.ctx.lineTo(px + sz, py + sz*0.8 + 3*s); this.ctx.lineTo(px - sz*0.7, py + sz*1.5 + 4*s); this.ctx.closePath();
             this.ctx.fillStyle = (i%2) ? 'rgba(255,255,255,0.20)' : 'rgba(112,124,135,0.13)'; this.ctx.fill();
         }
-        this.ctx.lineWidth = 1;
+        this.ctx.lineWidth = 1*s;
         for(let i=0; i<14; i++){
             const r1 = Math.abs(Math.sin(i*3.17)*9137.13) % 1; const r2 = Math.abs(Math.sin(i*7.91)*3571.70) % 1; const sx = fx + r1*fw;
             this.ctx.strokeStyle = (i%2) ? 'rgba(255,255,255,0.42)' : 'rgba(104,116,127,0.24)';
-            this.ctx.beginPath(); this.ctx.moveTo(sx, fy + r2*fh*0.5); this.ctx.quadraticCurveTo(sx + (r2-0.5)*9, fy + fh*0.55, sx + (r1-0.5)*11, fy + fh*(0.55 + r2*0.42)); this.ctx.stroke();
+            this.ctx.beginPath(); this.ctx.moveTo(sx, fy + r2*fh*0.5); this.ctx.quadraticCurveTo(sx + (r2-0.5)*9*s, fy + fh*0.55, sx + (r1-0.5)*11*s, fy + fh*(0.55 + r2*0.42)); this.ctx.stroke();
         }
         this.ctx.restore();
-        const bandH = 13;
+        const bandH = 13*s;
         const tg = this.ctx.createLinearGradient(fx, 0, fx+fw, 0);
         tg.addColorStop(0,'#9aa3ab'); tg.addColorStop(0.22,'#f2f6f9'); tg.addColorStop(0.5,'#b9c1c9'); tg.addColorStop(0.78,'#eef3f6'); tg.addColorStop(1,'#879097');
         this.ctx.fillStyle = tg; this.ctx.fillRect(fx, fy, fw, bandH);
-        path(); this.ctx.strokeStyle='#828c94'; this.ctx.lineWidth=1.8; this.ctx.stroke();
+        path(); this.ctx.strokeStyle='#828c94'; this.ctx.lineWidth=1.8*s; this.ctx.stroke();
         this.ctx.restore();
       }
       
-      drawTube(x, y, w, h, fill) {
+      drawTube(x, y, w, h, s, fill) {
         this.ctx.save();
         const r = w/2, bodyH = h - r;
         const path = () => { this.ctx.beginPath(); this.ctx.moveTo(x, y); this.ctx.lineTo(x, y+bodyH); this.ctx.arc(x+r, y+bodyH, r, Math.PI, 0, true); this.ctx.lineTo(x+w, y); this.ctx.closePath(); };
         if(fill){
             this.ctx.save(); path(); this.ctx.clip(); this.ctx.fillStyle = fill; this.ctx.fillRect(x, y+h*0.10, w, h);
-            this.ctx.strokeStyle='rgba(120,180,220,0.75)'; this.ctx.lineWidth=2; this.ctx.beginPath();
-            for(let i=0;i<=w;i+=6) this.ctx.lineTo(x+i, y+h*0.10+Math.sin(i*0.22+this.frames*0.05)*1.4);
+            this.ctx.strokeStyle='rgba(120,180,220,0.75)'; this.ctx.lineWidth=2*s; this.ctx.beginPath();
+            for(let i=0;i<=w;i+=6*s) this.ctx.lineTo(x+i, y+h*0.10+Math.sin(i*0.22/s+this.frames*0.05)*1.4*s);
             this.ctx.stroke(); this.ctx.restore();
         }
         const g = this.ctx.createLinearGradient(x, y, x+w, y);
         g.addColorStop(0,'rgba(255,255,255,0.65)'); g.addColorStop(0.42,'rgba(255,255,255,0.06)'); g.addColorStop(1,'rgba(255,255,255,0.45)');
-        path(); this.ctx.fillStyle=g; this.ctx.fill(); this.ctx.strokeStyle='#9fc0d4'; this.ctx.lineWidth=2.2; path(); this.ctx.stroke();
-        this.ctx.strokeStyle='#8fb3ca'; this.ctx.lineWidth=3.4; this.ctx.beginPath(); this.ctx.moveTo(x-2, y); this.ctx.lineTo(x+w+2, y); this.ctx.stroke();
-        this.ctx.fillStyle='rgba(255,255,255,0.55)'; this.rrect(x+w*0.16, y+8, w*0.09, h-r-16, 3); this.ctx.fill();
+        path(); this.ctx.fillStyle=g; this.ctx.fill(); this.ctx.strokeStyle='#9fc0d4'; this.ctx.lineWidth=2.2*s; path(); this.ctx.stroke();
+        this.ctx.strokeStyle='#8fb3ca'; this.ctx.lineWidth=3.4*s; this.ctx.beginPath(); this.ctx.moveTo(x-2*s, y); this.ctx.lineTo(x+w+2*s, y); this.ctx.stroke();
+        this.ctx.fillStyle='rgba(255,255,255,0.55)'; this.rrect(x+w*0.16, y+8*s, w*0.09, h-r-16*s, 3*s); this.ctx.fill();
         this.ctx.restore();
       }
 
@@ -499,31 +528,31 @@
         this.ctx.restore();
       }
 
-      drawMBLSensor(x, y, w, reading) {
-        this.ctx.save(); const h = 58, cx = x + w/2;
-        this.ctx.strokeStyle='#8d99a6'; this.ctx.lineWidth=5; this.ctx.lineCap='round';
-        this.ctx.beginPath(); this.ctx.moveTo(cx, y-h+8); this.ctx.quadraticCurveTo(cx+4, y-h-34, x+w+26, y-h-30); this.ctx.stroke();
+      drawMBLSensor(x, y, w, s, reading) {
+        this.ctx.save(); const h = 58*s, cx = x + w/2;
+        this.ctx.strokeStyle='#8d99a6'; this.ctx.lineWidth=5*s; this.ctx.lineCap='round';
+        this.ctx.beginPath(); this.ctx.moveTo(cx, y-h+8*s); this.ctx.quadraticCurveTo(cx+4*s, y-h-34*s, x+w+26*s, y-h-30*s); this.ctx.stroke();
         const bg = this.ctx.createLinearGradient(x, y-h, x, y);
         bg.addColorStop(0, '#4b5563'); bg.addColorStop(1, '#232a33');
-        this.ctx.fillStyle = bg; this.rrect(x-3, y-h, w+6, h, 9); this.ctx.fill();
-        this.ctx.fillStyle='#0b1a10'; this.rrect(x+4, y-h+7, w-8, 26, 5); this.ctx.fill();
+        this.ctx.fillStyle = bg; this.rrect(x-3*s, y-h, w+6*s, h, 9*s); this.ctx.fill();
+        this.ctx.fillStyle='#0b1a10'; this.rrect(x+4*s, y-h+7*s, w-8*s, 26*s, 5*s); this.ctx.fill();
         this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
         if(reading){
-            this.ctx.fillStyle='#8ce99a'; this.ctx.font='bold 8px monospace'; this.ctx.fillText('MBL', cx, y-h+14);
-            this.ctx.fillStyle='#39d353'; this.ctx.font='bold 11px monospace'; this.ctx.fillText(reading, cx, y-h+26);
+            this.ctx.fillStyle='#8ce99a'; this.ctx.font=`bold ${8*s}px monospace`; this.ctx.fillText('MBL', cx, y-h+14*s);
+            this.ctx.fillStyle='#39d353'; this.ctx.font=`bold ${11*s}px monospace`; this.ctx.fillText(reading, cx, y-h+26*s);
         }else{
-            this.ctx.fillStyle='#39d353'; this.ctx.font='bold 13px monospace'; this.ctx.fillText('MBL', cx, y-h+20);
+            this.ctx.fillStyle='#39d353'; this.ctx.font=`bold ${13*s}px monospace`; this.ctx.fillText('MBL', cx, y-h+20*s);
         }
         for(let i=0;i<3;i++){
-            this.ctx.beginPath(); this.ctx.arc(x+12+i*13, y-h+43, 3.2, 0, Math.PI*2);
+            this.ctx.beginPath(); this.ctx.arc(x+12*s+i*13*s, y-h+43*s, 3.2*s, 0, Math.PI*2);
             this.ctx.fillStyle = i===0 ? '#51cf66' : 'rgba(255,255,255,0.22)'; this.ctx.fill();
         }
-        this.ctx.fillStyle='#b6bec7'; this.rrect(cx-2.5, y+8, 5, 96, 2.5); this.ctx.fill();
+        this.ctx.fillStyle='#b6bec7'; this.rrect(cx-2.5*s, y+8*s, 5*s, 96*s, 2.5*s); this.ctx.fill();
         this.ctx.restore();
       }
 
       drawWaterBathShared(hx, hy) {
-        let s = this.isMobile ? 0.9 : 1.3; let bw = 180*s, bh = 160*s, sw = 80*s, sh = 120*s;
+        let s = this.scale; let bw = 180*s, bh = 160*s, sw = 80*s, sh = 120*s;
         const bodyG = this.ctx.createLinearGradient(hx, hy, hx, hy+60*s);
         bodyG.addColorStop(0, '#59616b'); bodyG.addColorStop(1, '#2b3138');
         this.ctx.fillStyle=bodyG; this.rrect(hx-100*s, hy, 200*s, 60*s, 10*s); this.ctx.fill();
@@ -547,16 +576,16 @@
         this.ctx.fillStyle='#54705b'; this.ctx.font=`bold ${16*s}px Noto Sans KR`; this.ctx.textAlign='center'; this.ctx.fillText("물중탕 장치", hx, hy+85*s);
         
         this.ctx.save(); let bx=hx-bw/2, by=hy-bh;
-        this.ctx.fillStyle='rgba(150,205,240,0.38)'; this.ctx.fillRect(bx+3, by+bh*0.12, bw-6, bh*0.88-3);
+        this.ctx.fillStyle='rgba(150,205,240,0.38)'; this.ctx.fillRect(bx+3*s, by+bh*0.12, bw-6*s, bh*0.88-3*s);
         const g = this.ctx.createLinearGradient(bx, by, bx+bw, by);
         g.addColorStop(0,'rgba(255,255,255,0.55)'); g.addColorStop(0.45,'rgba(255,255,255,0.05)'); g.addColorStop(1,'rgba(255,255,255,0.40)');
         this.ctx.fillStyle=g; this.ctx.fillRect(bx, by, bw, bh);
-        this.ctx.strokeStyle='#9fc0d4'; this.ctx.lineWidth=2.6;
+        this.ctx.strokeStyle='#9fc0d4'; this.ctx.lineWidth=2.6*s;
         this.ctx.beginPath(); this.ctx.moveTo(bx, by); this.ctx.lineTo(bx, by+bh); this.ctx.lineTo(bx+bw, by+bh); this.ctx.lineTo(bx+bw, by); this.ctx.stroke();
         this.ctx.restore();
         
         this.ctx.fillStyle='#1576c4'; this.ctx.font=`bold ${12*s}px Noto Sans KR`; this.ctx.fillText('물', hx+bw/3, hy-20*s);
-        this.drawTube(hx-sw/2, hy-sh, sw, sh, 'rgba(232,244,252,0.55)');
+        this.drawTube(hx-sw/2, hy-sh, sw, sh, s, 'rgba(232,244,252,0.55)');
         this.ctx.fillStyle='#16301d'; this.ctx.fillText('에탄올', hx, hy-sh/2);
 
         // Highlight drop target when holding plant
@@ -721,36 +750,37 @@
           }
         } 
         else if(this.stage === 1) {
+          let s = this.scale;
           this.tubes.forEach(t => {
-            let cx = t.x+35;
-            this.drawTube(t.x, t.y, 70, 180, 'rgba(170,215,245,0.42)');
-            if(t.has.f) this.drawFoil(t.x, t.y, 70, 180);
-            if(t.has.p && !t.has.f) this.drawElodea(cx, t.y+170, 1.2, '#006400');
-            this.ctx.fillStyle='#16301d'; this.ctx.textAlign='center'; this.ctx.font='bold 15px Noto Sans KR'; this.ctx.fillText(t.id, cx, t.y+210); 
-            this.ctx.fillStyle='#54705b'; this.ctx.font='bold 12px Noto Sans KR'; this.ctx.fillText(t.l, cx, t.y+230);
+            let cx = t.x+35*s;
+            this.drawTube(t.x, t.y, 70*s, 180*s, s, 'rgba(170,215,245,0.42)');
+            if(t.has.f) this.drawFoil(t.x, t.y, 70*s, 180*s, s);
+            if(t.has.p && !t.has.f) this.drawElodea(cx, t.y+170*s, 1.2*s, '#006400');
+            this.ctx.fillStyle='#16301d'; this.ctx.textAlign='center'; this.ctx.font=`bold ${15*s}px Noto Sans KR`; this.ctx.fillText(t.id, cx, t.y+210*s); 
+            this.ctx.fillStyle='#54705b'; this.ctx.font=`bold ${12*s}px Noto Sans KR`; this.ctx.fillText(t.l, cx, t.y+230*s);
             
             if(t.has.l) { 
-                this.ctx.save(); this.ctx.fillStyle='rgba(255,236,150,0.4)'; this.ctx.beginPath(); this.ctx.moveTo(cx-15, t.y-100); this.ctx.lineTo(cx+15, t.y-100); this.ctx.lineTo(t.x+100, t.y+190); this.ctx.lineTo(t.x-30, t.y+190); this.ctx.fill(); this.ctx.restore();
+                this.ctx.save(); this.ctx.fillStyle='rgba(255,236,150,0.4)'; this.ctx.beginPath(); this.ctx.moveTo(cx-15*s, t.y-100*s); this.ctx.lineTo(cx+15*s, t.y-100*s); this.ctx.lineTo(t.x+100*s, t.y+190*s); this.ctx.lineTo(t.x-30*s, t.y+190*s); this.ctx.fill(); this.ctx.restore();
             }
             const dat = this.mblData[t.id];
             let rd = null;
             if(dat && dat.length) {
               rd = `O₂ ${Math.round(dat[dat.length-1].o2)}%`;
             }
-            this.drawMBLSensor(t.x, t.y, 70, rd);
+            this.drawMBLSensor(t.x, t.y, 70*s, s, rd);
 
             // CO2 주입 시각 피드백 추가
             if(t.co2Anim > 0) {
                 t.co2Anim--;
-                if(this.frames%2===0) this.particles.push({x:t.x+10+Math.random()*50, y:t.y+170, v:3+Math.random()*2, type:'co2', top:t.y, tubeId: t.id});
+                if(this.frames%2===0) this.particles.push({x:t.x+10*s+Math.random()*50*s, y:t.y+170*s, v:3+Math.random()*2, type:'co2', top:t.y, tubeId: t.id});
                 
                 if(t.co2Anim > 30) {
                     this.ctx.save();
                     this.ctx.fillStyle = `rgba(59, 130, 246, ${Math.min(1, (t.co2Anim-30)/30)})`; 
-                    this.ctx.font = 'bold 16px "Noto Sans KR"';
+                    this.ctx.font = `bold ${16*s}px "Noto Sans KR"`;
                     this.ctx.textAlign = 'center';
                     this.ctx.fillText('+ CO₂ 주입됨!', cx, t.co2MsgY);
-                    t.co2MsgY -= 0.6; // 위로 떠오르는 애니메이션
+                    t.co2MsgY -= 0.6*s; // 위로 떠오르는 애니메이션
                     this.ctx.restore();
                 }
             }
@@ -771,21 +801,22 @@
           let isRunningOrDone = this.mblData.running || this.mblData.done;
           let stacked = false;
 
-          if (this.isMobile) {
+          if (this.width < 768) {
               if (isRunningOrDone) {
                   stacked = true;
                   gx = 15; gw = this.width - 30;
-                  let topY = this.tubes[0].y + 200; // 도구가 사라진 빈자리에 착 붙임
-                  let availableH = this.height - topY - 90; // 하단 여백 확보
-                  gh = Math.max(45, (availableH - 20) / 3); // 남은 공간에 3등분하여 딱 맞게 표시
+                  let topY = this.tubes[0].y + 190*s + 20*s; // 튜브 밑에 여유 확보
+                  let availableH = this.height - topY - 80; // 하단 컨트롤 영역 여백
+                  gh = Math.max(35, availableH / 3 - 10);
                   gy = topY;
               } else {
                   gx = 10; gw = (this.width - 30) / 3;
-                  gh = 60; gy = this.tools[0].y + 60;
+                  gy = this.tools[0].y + 35*s + 20*s; // 도구 하단 여백
+                  gh = Math.max(40, this.height - gy - 80); // 남은 공간 계산
               }
           } else {
               gx = 40; gw = (this.width - 120) / 3;
-              gh = 160; gy = this.height - 220;
+              gh = 160*s; gy = this.height - gh - 60*s;
           }
 
           ['A','B','C'].forEach((id, i) => {
@@ -816,21 +847,21 @@
           if(!this.mblData.running && !this.mblData.done) {
              this.tools.forEach(t => {
                 if(this.dragItem===t) return;
-                this.ctx.fillStyle='#fff'; this.ctx.beginPath(); this.ctx.roundRect(t.x-27, t.y-30, 54, 54, 13); this.ctx.fill(); this.ctx.stroke();
-                this.drawToolIcon(t.t, t.x, t.y-3, 1);
-                this.ctx.fillStyle='#16301d'; this.ctx.fillText(t.n, t.x, t.y+36);
+                this.ctx.fillStyle='#fff'; this.ctx.beginPath(); this.ctx.roundRect(t.x-27*s, t.y-30*s, 54*s, 54*s, 13*s); this.ctx.fill(); this.ctx.stroke();
+                this.drawToolIcon(t.t, t.x, t.y-3*s, 1*s);
+                this.ctx.fillStyle='#16301d'; this.ctx.font=`bold ${12*s}px Noto Sans KR`; this.ctx.fillText(t.n, t.x, t.y+36*s);
              });
           }
         } 
         else if(this.stage === 2) {
-          let s = this.isMobile ? 0.9 : 1.3;
+          let s = this.scale;
           let hx = this.isMobile ? this.width/2 : this.width*0.75, hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           let startX = this.width*0.1, ty = this.isMobile ? this.height*0.15 : (this.height*0.7 - 240*s);
           
           let countInBeaker = Object.values(this.plantPos).filter(v=>v===1).length;
           ['A','B','C'].forEach((id,i) => {
              let tx = startX + i*(this.isMobile ? this.width*0.3 : this.width*0.15);
-             this.drawTube(tx, ty, 70*s, 150*s, 'rgba(170,215,245,0.38)');
+             this.drawTube(tx, ty, 70*s, 150*s, s, 'rgba(170,215,245,0.38)');
              if(this.plantPos[id] === 0) this.drawElodea(tx+35*s, ty+130*s, 1.2*s, '#006400');
           });
           this.drawWaterBathShared(hx, hy);
@@ -846,7 +877,7 @@
           }
         }
         else if(this.stage === 3) {
-          let s = this.isMobile ? 0.9 : 1.3;
+          let s = this.scale;
           let hx = this.isMobile ? this.width/2 : this.width*0.75, hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           this.drawWaterBathShared(hx, hy);
 
@@ -917,10 +948,11 @@
         if(this.dragItem && this.dragItem.type!=='dropper') {
            if(this.dragItem.t) {
                this.ctx.fillStyle='#fff'; this.ctx.beginPath(); this.ctx.roundRect(this.mouse.x-30, this.mouse.y-30, 60, 60, 15); this.ctx.fill(); this.ctx.stroke();
-               this.drawToolIcon(this.dragItem.t, this.mouse.x, this.mouse.y-3, 1.1);
+               this.drawToolIcon(this.dragItem.t, this.mouse.x, this.mouse.y-3, 1.1*this.scale);
            }
-           if(this.dragItem.type==='move_to_bath') this.drawElodea(this.mouse.x, this.mouse.y, 1.2, '#006400');
-           if(this.dragItem.type==='move_to_dish') this.drawElodea(this.mouse.x, this.mouse.y, 1.2, '#eeffee');
+           let s = this.scale;
+           if(this.dragItem.type==='move_to_bath') this.drawElodea(this.mouse.x, this.mouse.y, 1.2*s, '#006400');
+           if(this.dragItem.type==='move_to_dish') this.drawElodea(this.mouse.x, this.mouse.y, 1.2*s, '#eeffee');
         }
 
         this.animationId = requestAnimationFrame(this.loop);
