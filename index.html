@@ -212,20 +212,11 @@
         if(!this.canvas || !this.canvas.parentElement) return;
         const rect = this.canvas.parentElement.getBoundingClientRect();
         this.width = rect.width; 
-        this.viewH = window.innerHeight;
+        this.height = rect.height; // 화면 높이에 정확히 일치시켜 잘림 방지
         this.isMobile = this.width < 768;
         
-        let needH = this.viewH;
-        if(this.isMobile && this.stage === 1) {
-           const MBL_GY = 168 + 300 + 74; 
-           const MBL_GH = 130;
-           needH = Math.max(this.viewH, MBL_GY + MBL_GH + 120); 
-        }
-        
-        this.height = Math.max(needH, 300);
         this.canvas.width = this.width; this.canvas.height = this.height;
         this.effectCanvas.width = this.width; this.effectCanvas.height = this.height;
-        this.canvas.parentElement.style.height = `${this.height}px`;
         
         this.initMBLPositions();
       }
@@ -233,15 +224,18 @@
       initMBLPositions() {
         let ty, startX, gap, toolY;
         if(this.isMobile) {
-           ty = 168; startX = this.width * 0.10; gap = this.width * 0.29; toolY = ty + 300;
+           ty = this.height * 0.16; // 모바일 화면 비율에 맞춰 16% 위치로 조정
+           startX = this.width * 0.12; 
+           gap = this.width * 0.3; 
+           toolY = ty + 190; // 시험관 바로 아래에 도구 배치
         } else {
-           ty = this.viewH * 0.35; startX = this.width * 0.1; gap = this.width * 0.13; toolY = this.viewH - 100;
+           ty = this.height * 0.35; startX = this.width * 0.1; gap = this.width * 0.13; toolY = this.height - 100;
         }
         if(!this.tubes) {
             this.tubes = [
-            {id:'A', l:'빛+CO₂', x:startX, y:ty, req:{p:1,l:1,c:1,f:0}, has:{p:0,l:0,c:0,f:0}, co2Anim:0 },
-            {id:'B', l:'빛차단', x:startX+gap, y:ty, req:{p:1,l:0,c:1,f:1}, has:{p:0,l:0,c:0,f:0}, co2Anim:0 },
-            {id:'C', l:'CO₂없음', x:startX+gap*2, y:ty, req:{p:1,l:1,c:0,f:0}, has:{p:0,l:0,c:0,f:0}, co2Anim:0 }
+            {id:'A', l:'빛+CO₂', x:startX, y:ty, req:{p:1,l:1,c:1,f:0}, has:{p:0,l:0,c:0,f:0}, co2Anim:0, co2MsgY:0 },
+            {id:'B', l:'빛차단', x:startX+gap, y:ty, req:{p:1,l:0,c:1,f:1}, has:{p:0,l:0,c:0,f:0}, co2Anim:0, co2MsgY:0 },
+            {id:'C', l:'CO₂없음', x:startX+gap*2, y:ty, req:{p:1,l:1,c:0,f:0}, has:{p:0,l:0,c:0,f:0}, co2Anim:0, co2MsgY:0 }
             ];
         } else {
             this.tubes[0].x = startX; this.tubes[0].y = ty;
@@ -271,16 +265,16 @@
             });
           }
         } else if(this.stage === 2) {
-          let s = this.isMobile ? 1 : 1.3;
+          let s = this.isMobile ? 0.9 : 1.3; // 모바일에서 겹치지 않게 0.9로 축소
           const hx = this.isMobile ? this.width/2 : this.width*0.75;
-          const hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          const hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           const btnX = hx+52*s, btnY = hy+30*s;
           // Hotplate Power Switch Hit Test
           if(Math.hypot(this.mouse.x-btnX, this.mouse.y-btnY) < 25*s) { 
             if(e.cancelable) e.preventDefault(); 
             this.hotplate.on = !this.hotplate.on; playSound('pop'); 
           }
-          const ty = this.isMobile ? this.viewH*0.15 : (this.viewH*0.7 - 240*s);
+          const ty = this.isMobile ? this.height*0.15 : (this.height*0.7 - 240*s);
           const startX = this.width*0.1;
           ['A','B','C'].forEach((id,i)=>{
              let tx = startX + i*(this.isMobile ? this.width*0.3 : this.width*0.15);
@@ -289,9 +283,9 @@
              }
           });
         } else if(this.stage === 3) {
-          let s = this.isMobile ? 1 : 1.3;
+          let s = this.isMobile ? 0.9 : 1.3;
           let hx = this.isMobile ? this.width/2 : this.width*0.75;
-          let hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          let hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           
           ['A', 'B', 'C'].forEach((id, i) => {
             if(this.plantPos[id] === 1 && Math.hypot(this.mouse.x-(hx-30*s+i*30*s), this.mouse.y-(hy-20*s)) < 25*s) {
@@ -299,14 +293,13 @@
                  this.plantPos[id] = 99;
             }
           });
-          const dishY = this.isMobile ? this.viewH*0.35 + 40 : this.viewH*0.55 + 40;
+          const dishY = this.isMobile ? this.height*0.35 + 20 : this.height*0.55 + 40;
           if(this.dropper.visible && !this.dropper.squeezing) {
-             let dx = this.dropper.x || this.width/2, dy = this.dropper.y || (this.isMobile ? this.viewH*0.12 : 60);
+             let dx = this.dropper.x || this.width/2, dy = this.dropper.y || (this.isMobile ? this.height*0.12 : 60);
              if(this.dropper.target > -1) {
                  dx = (this.isMobile ? this.width*0.17+this.dropper.target*this.width*0.33 : this.width*0.15+this.dropper.target*180);
                  dy = dishY - 100*s;
              }
-             // Increased Dropper hit radius for easy picking
              if(Math.hypot(this.mouse.x-dx, this.mouse.y-dy) < 80*s) {
                  this.dragItem = {type:'dropper', ox:this.mouse.x, oy:this.mouse.y, sx:dx, sy:dy};
                  this.downPos = {x:this.mouse.x, y:this.mouse.y};
@@ -336,15 +329,15 @@
           }
           this.placeMBLTool();
         } else if(this.stage === 2 && this.dragItem.type==='move_to_bath') {
-          let s = this.isMobile ? 1 : 1.3;
+          let s = this.isMobile ? 0.9 : 1.3;
           const hx = this.isMobile ? this.width/2 : this.width*0.75;
-          const hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          const hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           if(Math.hypot(this.mouse.x-hx, this.mouse.y-(hy-60*s)) < 100*s) { 
               this.plantPos[this.dragItem.id] = 1; playSound('pop'); 
           } else { this.plantPos[this.dragItem.id] = this.dragItem.prevPos || 0; } 
         } else if(this.stage === 3) {
-          let s = this.isMobile ? 1 : 1.3;
-          const dishY = this.isMobile ? this.viewH*0.35 + 40 : this.viewH*0.55 + 40;
+          let s = this.isMobile ? 0.9 : 1.3;
+          const dishY = this.isMobile ? this.height*0.35 + 20 : this.height*0.55 + 40;
           if(this.dragItem.type==='dropper') {
             const moved = this.downPos ? Math.hypot(this.mouse.x-this.downPos.x, this.mouse.y-this.downPos.y) : 99;
             if(moved <= 10 && this.dropper.target > -1 && !this.dishLeaves[this.dropper.target].isReacting) {
@@ -373,7 +366,7 @@
              if(d==='plant'&&t.req.p) { t.has.p=1; valid=true; }
              else if(d==='foil'&&t.req.f) { t.has.f=1; valid=true; }
              else if(d==='lamp'&&t.req.l) { t.has.l=1; valid=true; }
-             else if(d==='co2'&&t.req.c) { t.has.c=1; t.co2Anim=120; valid=true; }
+             else if(d==='co2'&&t.req.c) { t.has.c=1; t.co2Anim=100; t.co2MsgY=t.y+130; valid=true; }
              if(valid) playSound('pop');
              else { 
                playSound('error'); 
@@ -392,8 +385,8 @@
       
       drawDropHint(x, y, r) {
         this.ctx.save();
-        this.ctx.strokeStyle = `rgba(47, 158, 68, ${0.5 + Math.sin(this.frames*0.1)*0.4})`;
-        this.ctx.lineWidth = 4;
+        this.ctx.strokeStyle = `rgba(255, 130, 0, ${0.6 + Math.sin(this.frames*0.15)*0.4})`;
+        this.ctx.lineWidth = 5;
         this.ctx.setLineDash([8, 8]);
         this.ctx.beginPath(); this.ctx.arc(x, y, r, 0, Math.PI*2); this.ctx.stroke();
         this.ctx.restore();
@@ -530,7 +523,7 @@
       }
 
       drawWaterBathShared(hx, hy) {
-        let s = this.isMobile ? 1 : 1.3; let bw = 180*s, bh = 160*s, sw = 80*s, sh = 120*s;
+        let s = this.isMobile ? 0.9 : 1.3; let bw = 180*s, bh = 160*s, sw = 80*s, sh = 120*s;
         const bodyG = this.ctx.createLinearGradient(hx, hy, hx, hy+60*s);
         bodyG.addColorStop(0, '#59616b'); bodyG.addColorStop(1, '#2b3138');
         this.ctx.fillStyle=bodyG; this.rrect(hx-100*s, hy, 200*s, 60*s, 10*s); this.ctx.fill();
@@ -595,21 +588,93 @@
         this.ctx.clearRect(0,0,this.width,this.height);
         
         if(this.stage === 0) {
-          const cx = this.width/2, cy = this.viewH/2;
+          const cx = this.width/2, cy = this.height/2;
+          
+          // 1. 배경: 식물 잎 (단면)
           const bgGrad = this.ctx.createLinearGradient(0, 0, 0, this.height);
           bgGrad.addColorStop(0, '#81c784'); bgGrad.addColorStop(1, '#2e7d32');
           this.ctx.fillStyle = bgGrad; this.ctx.fillRect(0,0,this.width,this.height);
           
+          // 잎 내부 질감 (세포)
+          this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+          for(let i=0; i<this.width; i+=40) {
+            for(let j=0; j<this.height; j+=40) {
+              if((i+j)%80 === 0) {
+                this.ctx.beginPath(); this.ctx.arc(i, j, 15, 0, Math.PI*2); this.ctx.fill();
+              }
+            }
+          }
+
+          // 2. 공장 (엽록체)
           this.ctx.save(); this.ctx.translate(cx, cy);
-          this.ctx.fillStyle = '#00695c'; this.ctx.beginPath(); this.ctx.arc(0, 0, 100, Math.PI, 0); this.ctx.lineTo(100, 80); this.ctx.lineTo(-100, 80); this.ctx.fill();
+          const domeGrad = this.ctx.createRadialGradient(-30, -30, 10, 0, 0, 120);
+          domeGrad.addColorStop(0, '#a7ffeb'); domeGrad.addColorStop(1, '#00695c');
+          this.ctx.fillStyle = domeGrad;
+          this.ctx.beginPath(); this.ctx.arc(0, 0, 100, Math.PI, 0); this.ctx.lineTo(100, 80); this.ctx.lineTo(-100, 80); this.ctx.closePath();
+          this.ctx.fill();
+          this.ctx.strokeStyle = '#fff'; this.ctx.lineWidth=3; this.ctx.stroke();
+          
+          // 공장 내부 디테일 (창문)
+          this.ctx.fillStyle = 'rgba(255,255,255,0.3)'; this.ctx.fillRect(-80, 20, 160, 40);
           this.ctx.restore();
+
+          // 3. 파이프 및 굴뚝
+          // 물 파이프 (왼쪽)
+          const pipeY = cy + 20;
+          this.ctx.fillStyle = '#4fc3f7'; 
+          this.ctx.beginPath(); this.ctx.moveTo(0, pipeY-15); this.ctx.lineTo(cx-100, pipeY-15); this.ctx.lineTo(cx-100, pipeY+15); this.ctx.lineTo(0, pipeY+15); this.ctx.fill();
+          this.ctx.strokeStyle = '#0277bd'; this.ctx.stroke();
           
-          this.ctx.fillStyle = 'white'; this.ctx.font = 'bold 16px Noto Sans KR'; this.ctx.textAlign = 'center';
+          // 물 흐름 효과
+          this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          const flowX = (this.frames * 2) % 60;
+          for(let i=0; i<cx-100; i+=60) {
+            this.ctx.beginPath(); this.ctx.arc(i + flowX, pipeY, 3, 0, Math.PI*2); this.ctx.fill();
+          }
+
+          // 이산화탄소 굴뚝 (왼쪽 위)
+          const chimneyInX = cx - 70;
+          this.ctx.fillStyle = '#bdbdbd';
+          this.ctx.fillRect(chimneyInX, cy-140, 40, 100);
+          this.ctx.beginPath(); this.ctx.ellipse(chimneyInX+20, cy-140, 25, 10, 0, 0, Math.PI*2); this.ctx.fill();
+          this.ctx.strokeRect(chimneyInX, cy-140, 40, 100);
+
+          // 산소 굴뚝 (오른쪽 위)
+          const chimneyOutX = cx + 40;
+          this.ctx.fillStyle = '#bdbdbd';
+          this.ctx.fillRect(chimneyOutX, cy-140, 40, 100);
+          this.ctx.beginPath(); this.ctx.ellipse(chimneyOutX+20, cy-140, 25, 10, 0, 0, Math.PI*2); this.ctx.fill();
+          this.ctx.strokeRect(chimneyOutX, cy-140, 40, 100);
+
+          // 포도당 슈트 (오른쪽 아래)
+          this.ctx.fillStyle = '#ffcc80';
+          this.ctx.beginPath(); this.ctx.moveTo(cx+20, cy+60); this.ctx.lineTo(cx+120, cy+150); this.ctx.lineTo(cx+140, cy+150); this.ctx.lineTo(cx+40, cy+40); this.ctx.fill(); this.ctx.stroke();
+
+          // 4. 태양 (자연스러운 그라데이션)
+          const sunX = this.width - 80; const sunY = 80;
+          const rayGrad = this.ctx.createRadialGradient(sunX, sunY, 40, sunX, sunY, 200);
+          rayGrad.addColorStop(0, 'rgba(255, 235, 59, 0.8)'); rayGrad.addColorStop(1, 'rgba(255, 235, 59, 0)');
+          this.ctx.fillStyle = rayGrad;
+          this.ctx.beginPath(); this.ctx.arc(sunX, sunY, 200, 0, Math.PI*2); this.ctx.fill();
+
+          const sunBody = this.ctx.createRadialGradient(sunX-10, sunY-10, 10, sunX, sunY, 40);
+          sunBody.addColorStop(0, '#fff59d'); sunBody.addColorStop(0.5, '#fdd835'); sunBody.addColorStop(1, '#f57f17');
+          this.ctx.fillStyle = sunBody;
+          this.ctx.beginPath(); this.ctx.arc(sunX, sunY, 40, 0, Math.PI*2); this.ctx.fill();
+
+          // 5. 텍스트 라벨
+          this.ctx.fillStyle = 'white'; this.ctx.font = 'bold 14px "Noto Sans KR"'; this.ctx.textAlign = 'center';
+          this.ctx.fillText("물(H₂O)", 40, pipeY-25);
+          this.ctx.fillText("이산화탄소(CO₂)", chimneyInX+20, cy-160);
+          this.ctx.fillText("산소(O₂)", chimneyOutX+20, cy-160);
+          this.ctx.fillText("포도당", cx+90, cy+120);
           this.ctx.fillText("엽록체 공장", cx, cy+100);
-          
+          if(this.starchChain.length > 3) this.ctx.fillText("녹말(저장)", cx+230, cy+180);
+
+          // 6. 입자 시뮬레이션
           if(this.frames % 80 === 0) {
-            this.introParticles.push({ type:'H2O', color:'#0288d1', x:0, y:cy+20, path:[{x:cx-90, y:cy+20}, {x:cx-20, y:cy}], stage:0, speed:2 });
-            this.introParticles.push({ type:'CO2', color:'#757575', x:cx-50, y:0, path:[{x:cx-50, y:cy-80}, {x:cx-20, y:cy}], stage:0, speed:1.5 });
+            this.introParticles.push({ type:'H2O', color:'#0288d1', x:0, y:pipeY, path:[{x:cx-90, y:pipeY}, {x:cx-20, y:cy}], stage:0, speed:2 });
+            this.introParticles.push({ type:'CO2', color:'#757575', x:chimneyInX+20, y:0, path:[{x:chimneyInX+20, y:cy-80}, {x:cx-20, y:cy}], stage:0, speed:1.5 });
           }
 
           for(let i=this.introParticles.length-1; i>=0; i--) {
@@ -623,7 +688,7 @@
             } else if (p.type === 'reacting') {
                 p.wait--;
                 if(p.wait <= 0) {
-                    this.introParticles.push({ type:'O2', color:'#b3e5fc', x:cx+20, y:cy, path:[{x:cx+60, y:cy-80}, {x:cx+60, y:-50}], stage:0, speed:2 });
+                    this.introParticles.push({ type:'O2', color:'#b3e5fc', x:cx+20, y:cy, path:[{x:chimneyOutX+20, y:cy-80}, {x:chimneyOutX+20, y:-50}], stage:0, speed:2 });
                     p.type = 'Glucose'; p.color = '#e1bee7';
                     p.path = [{x:cx+120, y:cy+150}, {x:cx+150+(Math.random()*40), y:cy+180+(Math.random()*20)}];
                     p.stage = 0; p.speed = 1.5;
@@ -633,11 +698,25 @@
             } else if (p.type === 'O2' && !p.path[p.stage]) {
                 this.introParticles.splice(i, 1); continue;
             }
+            
             this.ctx.fillStyle = p.color;
             if(p.type === 'Glucose') {
-                this.ctx.beginPath(); for(let k=0; k<6; k++) this.ctx.lineTo(p.x+8*Math.cos(k*Math.PI/3), p.y+8*Math.sin(k*Math.PI/3)); this.ctx.fill();
+                this.ctx.beginPath(); for(let k=0; k<6; k++) this.ctx.lineTo(p.x+8*Math.cos(k*Math.PI/3), p.y+8*Math.sin(k*Math.PI/3)); 
+                this.ctx.fill(); this.ctx.strokeStyle='#8e24aa'; this.ctx.lineWidth=1; this.ctx.stroke();
             } else if (p.type !== 'reacting') {
                 this.ctx.beginPath(); this.ctx.arc(p.x, p.y, 6, 0, Math.PI*2); this.ctx.fill();
+            }
+          }
+
+          // 녹말 사슬 그리기
+          for(let i=0; i<this.starchChain.length; i++) {
+            let s = this.starchChain[i];
+            this.ctx.fillStyle = '#e1bee7'; this.ctx.strokeStyle='#8e24aa'; this.ctx.lineWidth=1;
+            this.ctx.beginPath();
+            for(let k=0; k<6; k++) this.ctx.lineTo(s.x + 8*Math.cos(k*Math.PI/3), s.y + 8*Math.sin(k*Math.PI/3));
+            this.ctx.fill(); this.ctx.stroke();
+            if(i > 0) {
+              this.ctx.beginPath(); this.ctx.moveTo(this.starchChain[i-1].x, this.starchChain[i-1].y); this.ctx.lineTo(s.x, s.y); this.ctx.stroke();
             }
           }
         } 
@@ -659,6 +738,22 @@
               rd = `O₂ ${Math.round(dat[dat.length-1].o2)}%`;
             }
             this.drawMBLSensor(t.x, t.y, 70, rd);
+
+            // CO2 주입 시각 피드백 추가
+            if(t.co2Anim > 0) {
+                t.co2Anim--;
+                if(this.frames%2===0) this.particles.push({x:t.x+10+Math.random()*50, y:t.y+170, v:3+Math.random()*2, type:'co2', top:t.y, tubeId: t.id});
+                
+                if(t.co2Anim > 30) {
+                    this.ctx.save();
+                    this.ctx.fillStyle = `rgba(59, 130, 246, ${Math.min(1, (t.co2Anim-30)/30)})`; 
+                    this.ctx.font = 'bold 16px "Noto Sans KR"';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.fillText('+ CO₂ 주입됨!', cx, t.co2MsgY);
+                    t.co2MsgY -= 0.6; // 위로 떠오르는 애니메이션
+                    this.ctx.restore();
+                }
+            }
           });
 
           if(this.mblData.running) {
@@ -672,27 +767,49 @@
              }
           }
 
-          let gx=10, gw=this.width/3-10, gy=this.isMobile?this.height-140:this.viewH-200, gh=100;
+          let gx, gw, gy, gh;
+          let isRunningOrDone = this.mblData.running || this.mblData.done;
+          let stacked = false;
+
+          if (this.isMobile) {
+              if (isRunningOrDone) {
+                  stacked = true;
+                  gx = 15; gw = this.width - 30;
+                  let topY = this.tubes[0].y + 200; // 도구가 사라진 빈자리에 착 붙임
+                  let availableH = this.height - topY - 90; // 하단 여백 확보
+                  gh = Math.max(45, (availableH - 20) / 3); // 남은 공간에 3등분하여 딱 맞게 표시
+                  gy = topY;
+              } else {
+                  gx = 10; gw = (this.width - 30) / 3;
+                  gh = 60; gy = this.tools[0].y + 60;
+              }
+          } else {
+              gx = 40; gw = (this.width - 120) / 3;
+              gh = 160; gy = this.height - 220;
+          }
+
           ['A','B','C'].forEach((id, i) => {
-             let curGx = gx + i*(gw+5);
-             this.ctx.fillStyle='#fff'; this.ctx.fillRect(curGx, gy, gw, gh);
-             this.ctx.strokeStyle='#eee'; this.ctx.lineWidth=0.5; this.ctx.beginPath();
-             for(let k=1; k<5; k++){ this.ctx.moveTo(curGx, gy+(gh/5)*k); this.ctx.lineTo(curGx+gw, gy+(gh/5)*k); }
+             let curGx = stacked ? gx : gx + i*(gw+10);
+             let curGy = stacked ? gy + i*(gh+10) : gy;
+
+             this.ctx.fillStyle='#fff'; this.ctx.fillRect(curGx, curGy, gw, gh);
+             this.ctx.strokeStyle='#eee'; this.ctx.lineWidth=1; this.ctx.beginPath();
+             for(let k=1; k<5; k++){ this.ctx.moveTo(curGx, curGy+(gh/5)*k); this.ctx.lineTo(curGx+gw, curGy+(gh/5)*k); }
              this.ctx.stroke();
 
-             if(this.mblData.running || this.mblData.done) {
-                 this.ctx.lineWidth=2;
+             if(isRunningOrDone) {
+                 this.ctx.lineWidth = stacked ? 3 : 2;
                  // CO2 Red Line
                  this.ctx.strokeStyle='#ef4444'; this.ctx.beginPath();
-                 this.mblData[id].forEach((v,x) => { let px=curGx+(x/200)*gw, py=(gy+gh)-(v.co2/100)*gh; if(x===0) this.ctx.moveTo(px,py); else this.ctx.lineTo(px,py); }); this.ctx.stroke();
+                 this.mblData[id].forEach((v,x) => { let px=curGx+(x/200)*gw, py=(curGy+gh)-(v.co2/100)*gh; if(x===0) this.ctx.moveTo(px,py); else this.ctx.lineTo(px,py); }); this.ctx.stroke();
                  // O2 Blue Line
                  this.ctx.strokeStyle='#3b82f6'; this.ctx.beginPath();
-                 this.mblData[id].forEach((v,x) => { let px=curGx+(x/200)*gw, py=(gy+gh)-(v.o2/100)*gh; if(x===0) this.ctx.moveTo(px,py); else this.ctx.lineTo(px,py); }); this.ctx.stroke();
+                 this.mblData[id].forEach((v,x) => { let px=curGx+(x/200)*gw, py=(curGy+gh)-(v.o2/100)*gh; if(x===0) this.ctx.moveTo(px,py); else this.ctx.lineTo(px,py); }); this.ctx.stroke();
              }
-             this.ctx.fillStyle='#333'; this.ctx.font='bold 12px Noto Sans KR'; this.ctx.textAlign='left'; this.ctx.fillText(id, curGx+8, gy+18);
-             if(i===0) { 
-                 this.ctx.fillStyle='#ef4444'; this.ctx.fillText('CO₂', curGx+gw-45, gy+18);
-                 this.ctx.fillStyle='#3b82f6'; this.ctx.fillText('O₂', curGx+gw-20, gy+18);
+             this.ctx.fillStyle='#333'; this.ctx.font='bold 12px Noto Sans KR'; this.ctx.textAlign='left'; this.ctx.fillText(id, curGx+8, curGy+18);
+             if(i===0 || stacked) { 
+                 this.ctx.fillStyle='#ef4444'; this.ctx.fillText('CO₂', curGx+gw-45, curGy+18);
+                 this.ctx.fillStyle='#3b82f6'; this.ctx.fillText('O₂', curGx+gw-20, curGy+18);
              }
           });
 
@@ -706,9 +823,9 @@
           }
         } 
         else if(this.stage === 2) {
-          let s = this.isMobile ? 1 : 1.3;
-          let hx = this.isMobile ? this.width/2 : this.width*0.75, hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
-          let startX = this.width*0.1, ty = this.isMobile ? this.viewH*0.15 : (this.viewH*0.7 - 240*s);
+          let s = this.isMobile ? 0.9 : 1.3;
+          let hx = this.isMobile ? this.width/2 : this.width*0.75, hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
+          let startX = this.width*0.1, ty = this.isMobile ? this.height*0.15 : (this.height*0.7 - 240*s);
           
           let countInBeaker = Object.values(this.plantPos).filter(v=>v===1).length;
           ['A','B','C'].forEach((id,i) => {
@@ -729,20 +846,25 @@
           }
         }
         else if(this.stage === 3) {
-          let s = this.isMobile ? 1 : 1.3;
-          let hx = this.isMobile ? this.width/2 : this.width*0.75, hy = this.isMobile ? this.viewH*0.7 : (this.viewH*0.7 - 60*s);
+          let s = this.isMobile ? 0.9 : 1.3;
+          let hx = this.isMobile ? this.width/2 : this.width*0.75, hy = this.isMobile ? this.height*0.75 : (this.height*0.7 - 60*s);
           this.drawWaterBathShared(hx, hy);
 
-          const dishY = this.isMobile ? this.viewH*0.35 + 40 : this.viewH*0.55 + 40;
+          const dishY = this.isMobile ? this.height*0.35 + 20 : this.height*0.55 + 40;
           let countInDish = Object.values(this.plantPos).filter(v=>v===2).length;
           
           ['A','B','C'].forEach((id,i) => {
              let dx = this.isMobile ? this.width*0.17+i*this.width*0.33 : this.width*0.15+i*180;
-             // Improved Petri Dish
-             this.ctx.fillStyle='rgba(210, 230, 240, 0.9)'; this.ctx.beginPath(); this.ctx.ellipse(dx, dishY, 60*s, 20*s, 0, 0, Math.PI*2); this.ctx.fill();
-             this.ctx.strokeStyle='#7a9eb3'; this.ctx.lineWidth=2*s; this.ctx.stroke();
+             // Improved Petri Dish Visiblity
+             this.ctx.shadowColor='rgba(0,0,0,0.15)'; this.ctx.shadowBlur=10;
+             this.ctx.fillStyle='rgba(230, 245, 255, 0.95)'; 
+             this.ctx.beginPath(); this.ctx.ellipse(dx, dishY, 60*s, 20*s, 0, 0, Math.PI*2); this.ctx.fill();
+             this.ctx.shadowBlur=0;
+             this.ctx.strokeStyle='#4a7c93'; this.ctx.lineWidth=3*s; this.ctx.stroke();
+             this.ctx.fillStyle='rgba(255,255,255,0.5)';
+             this.ctx.beginPath(); this.ctx.ellipse(dx, dishY+2*s, 54*s, 15*s, 0, 0, Math.PI*2); this.ctx.fill();
 
-             this.ctx.fillStyle='#16301d'; this.ctx.fillText(id, dx, dishY+40*s);
+             this.ctx.fillStyle='#16301d'; this.ctx.font=`bold ${16*s}px Noto Sans KR`; this.ctx.fillText(id, dx, dishY+45*s);
              
              if (this.dragItem && (this.dragItem.type==='move_to_dish' || this.dragItem.type==='dropper')) {
                  this.drawDropHint(dx, dishY, 40*s);
@@ -758,7 +880,7 @@
 
           if(countInDish === 3) this.dropper.visible = true;
           if(this.dropper.visible) {
-             let dx = this.dropper.x || this.width/2, dy = this.dropper.y || (this.isMobile?this.viewH*0.12:60);
+             let dx = this.dropper.x || this.width/2, dy = this.dropper.y || (this.isMobile?this.height*0.12:60);
              let snapped = false;
              ['A','B','C'].forEach((id,i)=>{
                  let tx = this.isMobile ? this.width*0.17+i*this.width*0.33 : this.width*0.15+i*180;
@@ -766,9 +888,9 @@
              });
              if(!snapped) this.dropper.target = -1;
              
-             this.ctx.save(); this.ctx.translate(dx, dy); this.ctx.scale(s*1.2, s*1.2); // Made Dropper larger
+             this.ctx.save(); this.ctx.translate(dx, dy); this.ctx.scale(s*1.5, s*1.5); // Made Dropper even larger for mobile
              // Highlight Dropper
-             this.ctx.shadowColor='rgba(255,100,50,0.5)'; this.ctx.shadowBlur=15;
+             this.ctx.shadowColor='rgba(255,100,50,0.8)'; this.ctx.shadowBlur=20;
              this.ctx.fillStyle='#e35d4a'; this.ctx.beginPath(); this.ctx.ellipse(0,-6,13,15,0,0,Math.PI*2); this.ctx.fill();
              this.ctx.shadowBlur=0;
              this.ctx.fillStyle='rgba(255,255,255,0.7)'; this.ctx.fillRect(-6, 13, 12, 48);
@@ -1133,13 +1255,13 @@
           }} /></div>}
 
           {/* Fixed bottom controls ensures it's always visible above canvas */}
-          <div className="fixed bottom-0 left-0 w-full px-4 py-4 flex justify-between items-center pointer-events-none z-[100]" style={{ paddingBottom: 'max(16px, var(--safe-bottom))' }}>
+          <div className="fixed bottom-0 left-0 w-full px-4 py-4 flex justify-between items-center pointer-events-none z-[100]" style={{ paddingBottom: 'max(20px, env(safe-area-inset-bottom, 20px))', background: 'linear-gradient(to top, rgba(242,248,241,1) 40%, rgba(242,248,241,0))' }}>
              <button onClick={() => setSimStage(s => Math.max(1, s-1))} className={`pointer-events-auto bg-white border border-gray-300 text-gray-700 px-5 py-3 rounded-xl font-bold shadow-xl ${simStage===1 ? 'opacity-0' : ''}`}>⬅ 이전</button>
              {simStage === 1 && <button id="mbl-start-btn" style={{display:'none'}} onClick={()=>{engineRef.current.mblData.running=true; playSound('pop'); document.getElementById('mbl-start-btn').style.display='none';}} className="pointer-events-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold shadow-xl animate-bounce">측정 시작 📊</button>}
              {simStage < 4 ? (
                <button disabled={!stageCompleted[simStage]} onClick={() => setSimStage(s => s+1)} className="pointer-events-auto bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:text-gray-500 text-white px-5 py-3 rounded-xl font-bold shadow-xl">다음 ➡</button>
              ) : (
-               <button disabled={!stageCompleted[4]} onClick={() => navigate('report')} className="pointer-events-auto bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 text-white px-5 py-3 rounded-xl font-bold shadow-xl animate-pulse">보고서 쓰기 📝</button>
+               <button disabled={!stageCompleted[4]} onClick={() => navigate('report')} className="pointer-events-auto bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 text-white px-6 py-4 rounded-2xl font-black shadow-2xl animate-pulse border-2 border-blue-400">📝 보고서 쓰기</button>
              )}
           </div>
         </div>
